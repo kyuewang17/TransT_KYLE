@@ -2,8 +2,9 @@
 .idea
 .idea/*
 
-# Local File
+# Local Files
 pytracking/evaluation/local.py
+ltr/admin/local.py
 
 # Pre-trained Networks
 pytracking/networks
