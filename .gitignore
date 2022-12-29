@@ -1,0 +1,18 @@
+# IntelliJ .idea configuration file
+.idea
+.idea/*
+
+# Local File
+#pytracking/evaluation/local.py
+
+# Pre-trained Networks
+pytracking/networks
+pytracking/networks/*
+
+# Result Plots
+pytracking/result_plots
+pytracking/result_plots/*
+
+# Tracking Results
+pytracking/tracking_results
+pytracking/tracking_results/*
