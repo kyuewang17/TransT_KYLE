@@ -3,7 +3,7 @@
 .idea/*
 
 # Local File
-#pytracking/evaluation/local.py
+pytracking/evaluation/local.py
 
 # Pre-trained Networks
 pytracking/networks
