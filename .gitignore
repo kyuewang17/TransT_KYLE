@@ -2,6 +2,10 @@
 .idea
 .idea/*
 
+# Dataset Directory
+datasets
+datasets/*
+
 # Local Files
 pytracking/evaluation/local.py
 ltr/admin/local.py
