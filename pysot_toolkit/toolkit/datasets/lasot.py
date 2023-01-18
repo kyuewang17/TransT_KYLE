@@ -66,6 +66,22 @@ class LaSOTDataset(Dataset):
         with open(os.path.join(dataset_root, name+'.json'), 'r') as f:
             meta_data = json.load(f)
 
+        # === LaSOT JSON Patch by KYLE === #
+        for sequence, sequence_meta_data in meta_data.items():
+            assert isinstance(sequence_meta_data, dict)
+
+            # Parse Sequence Name
+            parsed_seq_name = sequence.split("-")[0]
+
+            # Adjoin Parsed Sequence Name
+            for k, v in sequence_meta_data.items():
+                if k == "video_dir":
+                    meta_data[sequence][k] = "{}/{}".format(parsed_seq_name, v)
+                elif k == "img_names":
+                    meta_data[sequence][k] = \
+                        ["{}/{}".format(parsed_seq_name, rel_img_path) for rel_img_path in v]
+        # ================================ #
+
         # load videos
         pbar = tqdm(meta_data.keys(), desc='loading '+name, ncols=100)
         self.videos = {}

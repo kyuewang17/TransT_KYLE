@@ -39,8 +39,23 @@ torch.set_num_threads(1)
 def main():
     # load config
 
-    dataset_root = '' #Absolute path of the dataset
-    net_path = '' #Absolute path of the model
+    # Set Dataset Root Path and Network Path, conditionally
+    dataset_base_path = "/home/kyle/PycharmProjects/TransT_KYLE/datasets"
+    net_base_path = "/home/kyle/PycharmProjects/TransT_KYLE/pytracking/networks"
+    if args.dataset in ["CVPR13", "OTB50", "OTB100"]:
+        dataset_root = os.path.join(dataset_base_path, "OTB100")
+        net_path = os.path.join(net_base_path, "transt.pth")
+    elif args.dataset == "UAV123":
+        dataset_root = os.path.join(dataset_base_path, "UAV123", "data_seq", "UAV123")
+        net_path = os.path.join(net_base_path, "transt.pth")
+    elif args.dataset == "GOT-10k":
+        dataset_root = os.path.join(dataset_base_path, "GOT-10k", "test")
+        net_path = os.path.join(net_base_path, "TransT_GOT.pth")
+    elif args.dataset == "LaSOT":
+        dataset_root = os.path.join(dataset_base_path, "LaSOT")
+        net_path = os.path.join(net_base_path, "transt.pth")
+    else:
+        raise NotImplementedError()
 
     # create model
     net = NetWithBackbone(net_path=net_path, use_gpu=True)
@@ -129,6 +144,8 @@ def main():
                     v_idx+1, video.name, toc, idx / toc, lost_number))
             total_lost += lost_number
         print("{:s} total lost: {:d}".format(model_name, total_lost))
+    # === Non-VOTs === #
+    # (OTB, UAV123, GOT-10k, LaSOT, TrackingNet, etc.)
     else:
         # OPE tracking
         for v_idx, video in enumerate(dataset):
