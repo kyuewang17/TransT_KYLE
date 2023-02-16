@@ -69,15 +69,19 @@ class TransT(nn.Module):
         features_search, pos_search = self.backbone(search)
         feature_template = self.zf
         pos_template = self.pos_template
-        src_search, mask_search= features_search[-1].decompose()
+        src_search, mask_search = features_search[-1].decompose()
         assert mask_search is not None
         src_template, mask_template = feature_template[-1].decompose()
         assert mask_template is not None
+
+        # === Feature Fusion Network Forward === #
+        # TODO: What is "self.input_proj" ??
         hs = self.featurefusion_network(self.input_proj(src_template), mask_template, self.input_proj(src_search), mask_search, pos_template[-1], pos_search[-1])
 
         outputs_class = self.class_embed(hs)
         outputs_coord = self.bbox_embed(hs).sigmoid()
-        out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+        # out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+        out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1], 'FFN_output': hs.detach()}
         return out
 
     def template(self, z):

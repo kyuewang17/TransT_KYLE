@@ -45,15 +45,19 @@ class FeatureFusionNetwork(nn.Module):
         mask_temp = mask_temp.flatten(1)
         mask_search = mask_search.flatten(1)
 
-        memory_temp, memory_search = self.encoder(src1=src_temp, src2=src_search,
-                                                  src1_key_padding_mask=mask_temp,
-                                                  src2_key_padding_mask=mask_search,
-                                                  pos_src1=pos_temp,
-                                                  pos_src2=pos_search)
-        hs = self.decoder(memory_search, memory_temp,
-                          tgt_key_padding_mask=mask_search,
-                          memory_key_padding_mask=mask_temp,
-                          pos_enc=pos_temp, pos_dec=pos_search)
+        memory_temp, memory_search = \
+            self.encoder(
+                src1=src_temp, src2=src_search,
+                src1_key_padding_mask=mask_temp, src2_key_padding_mask=mask_search,
+                pos_src1=pos_temp, pos_src2=pos_search
+            )
+
+        hs = self.decoder(
+            memory_search, memory_temp,
+            tgt_key_padding_mask=mask_search, memory_key_padding_mask=mask_temp,
+            pos_enc=pos_temp, pos_dec=pos_search
+        )
+
         return hs.unsqueeze(0).transpose(1, 2)
 
 
@@ -84,6 +88,7 @@ class Decoder(nn.Module):
             output = self.norm(output)
 
         return output
+
 
 class Encoder(nn.Module):
 
@@ -209,27 +214,31 @@ class FeatureFusionLayer(nn.Module):
                      src2_key_padding_mask: Optional[Tensor] = None,
                      pos_src1: Optional[Tensor] = None,
                      pos_src2: Optional[Tensor] = None):
+
+        # ==== ECA for 1st source (initially template) ==== #
         q1 = k1 = self.with_pos_embed(src1, pos_src1)
-        src12 = self.self_attn1(q1, k1, value=src1, attn_mask=src1_mask,
-                               key_padding_mask=src1_key_padding_mask)[0]
+        src12 = self.self_attn1(q1, k1, value=src1, attn_mask=src1_mask, key_padding_mask=src1_key_padding_mask)[0]
         src1 = src1 + self.dropout11(src12)
         src1 = self.norm11(src1)
 
+        # ==== ECA for 2nd source (initially search) ==== #
         q2 = k2 = self.with_pos_embed(src2, pos_src2)
-        src22 = self.self_attn2(q2, k2, value=src2, attn_mask=src2_mask,
-                               key_padding_mask=src2_key_padding_mask)[0]
+        src22 = self.self_attn2(q2, k2, value=src2, attn_mask=src2_mask, key_padding_mask=src2_key_padding_mask)[0]
         src2 = src2 + self.dropout21(src22)
         src2 = self.norm21(src2)
 
-
-        src12 = self.multihead_attn1(query=self.with_pos_embed(src1, pos_src1),
-                                   key=self.with_pos_embed(src2, pos_src2),
-                                   value=src2, attn_mask=src2_mask,
-                                   key_padding_mask=src2_key_padding_mask)[0]
-        src22 = self.multihead_attn2(query=self.with_pos_embed(src2, pos_src2),
-                                   key=self.with_pos_embed(src1, pos_src1),
-                                   value=src1, attn_mask=src1_mask,
-                                   key_padding_mask=src1_key_padding_mask)[0]
+        src12 = self.multihead_attn1(
+            query=self.with_pos_embed(src1, pos_src1),
+            key=self.with_pos_embed(src2, pos_src2),
+            value=src2,
+            attn_mask=src2_mask, key_padding_mask=src2_key_padding_mask
+        )[0]
+        src22 = self.multihead_attn2(
+            query=self.with_pos_embed(src2, pos_src2),
+            key=self.with_pos_embed(src1, pos_src1),
+            value=src1,
+            attn_mask=src1_mask, key_padding_mask=src1_key_padding_mask
+        )[0]
 
         src1 = src1 + self.dropout12(src12)
         src1 = self.norm12(src1)

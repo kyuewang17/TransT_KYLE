@@ -17,7 +17,7 @@ class Tracker(object):
         self.window_penalty = window_penalty
         self.exemplar_size = exemplar_size
         self.instance_size = instance_size
-        self.net = self.net
+        self.net = self.net # why??
 
     def _convert_score(self, score):
 
@@ -89,15 +89,13 @@ class Tracker(object):
                        int(context_xmin):int(context_xmax + 1), :]
 
         if not np.array_equal(model_sz, original_sz):
-            im_patch = cv2.resize(im_patch, (model_sz, model_sz))
+            im_patch = cv2.resize(im_patch, (model_sz, model_sz)) # noqa
         im_patch = im_patch.transpose(2, 0, 1)
         im_patch = im_patch[np.newaxis, :, :, :]
         im_patch = im_patch.astype(np.float32)
         im_patch = torch.from_numpy(im_patch)
         im_patch = im_patch.cuda()
         return im_patch
-
-
 
     def initialize_features(self):
         if not getattr(self, 'features_initialized', False):
@@ -112,8 +110,7 @@ class Tracker(object):
         # Initialize
         self.initialize_features()
         bbox = info['init_bbox']
-        self.center_pos = np.array([bbox[0] + bbox[2] / 2,
-                                    bbox[1] + bbox[3] / 2])
+        self.center_pos = np.array([bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2])
         self.size = np.array([bbox[2], bbox[3]])
 
         # calculate z crop size
@@ -125,9 +122,7 @@ class Tracker(object):
         self.channel_average = np.mean(image, axis=(0, 1))
 
         # get crop
-        z_crop = self.get_subwindow(image, self.center_pos,
-                                    self.exemplar_size,
-                                    s_z, self.channel_average)
+        z_crop = self.get_subwindow(image, self.center_pos, self.exemplar_size, s_z, self.channel_average)
 
         # normalize
         z_crop = z_crop.float().mul(1.0 / 255.0).clamp(0.0, 1.0)
@@ -148,9 +143,7 @@ class Tracker(object):
         s_x = math.ceil(math.sqrt(w_x * h_x))
 
         # get crop
-        x_crop = self.get_subwindow(image, self.center_pos,
-                                    self.instance_size,
-                                    round(s_x), self.channel_average)
+        x_crop = self.get_subwindow(image, self.center_pos, self.instance_size, round(s_x), self.channel_average)
 
         # normalize
         x_crop = x_crop.float().mul(1.0 / 255.0).clamp(0.0, 1.0)
@@ -174,18 +167,14 @@ class Tracker(object):
         height = bbox[3]
 
         # clip boundary
-        cx, cy, width, height = self._bbox_clip(cx, cy, width,
-                                                height, image.shape[:2])
+        cx, cy, width, height = self._bbox_clip(cx, cy, width, height, image.shape[:2])
 
         # update state
         self.center_pos = np.array([cx, cy])
         self.size = np.array([width, height])
 
-        bbox = [cx - width / 2,
-                cy - height / 2,
-                width,
-                height]
+        bbox = [cx - width / 2, cy - height / 2, width, height]
+        # out = {'target_bbox': bbox, 'best_score': pscore}
+        out = {'target_bbox': bbox, 'best_score': pscore, 'FFN_output': outputs["FFN_output"]}
 
-        out = {'target_bbox': bbox,
-               'best_score': pscore}
         return out

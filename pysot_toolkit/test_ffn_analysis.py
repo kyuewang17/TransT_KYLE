@@ -12,12 +12,15 @@ if env_path not in sys.path:
     sys.path.append(env_path)
 import argparse
 import os
+from tqdm import tqdm
+import psutil
 
 import cv2
 import torch
 import numpy as np
 
 from pysot_toolkit.bbox import get_axis_aligned_bbox
+from pysot_toolkit.bbox import IoU, center2corner, rect_2_cxy_wh
 from pysot_toolkit.toolkit.datasets import DatasetFactory
 from pysot_toolkit.toolkit.utils.region import vot_overlap, vot_float2str
 from pysot_toolkit.trackers.tracker import Tracker
@@ -28,40 +31,52 @@ parser.add_argument('--dataset', type=str, help='datasets')
 parser.add_argument('--video', default='', type=str, help='eval one special video')
 parser.add_argument('--vis', action='store_true', help='whether visualzie result')
 parser.add_argument('--save', action='store_true', help='whether to save tracking result')
+parser.add_argument('--save_ffn_feats', action='store_true', help='whether to save ffn features and bboxes')
+
 parser.add_argument('--name', default='', type=str, help='name of results')
 args = parser.parse_args()
 
 torch.set_num_threads(1)
 
+# Set Project Root Path
+__PROJECT_ROOT_PATH__ = "/home/kyle/PycharmProjects/TransT_KYLE"
+
+
 def main():
     # load config
 
     # Set Dataset Root Path and Network Path, conditionally
-    dataset_base_path = "/home/kyle/PycharmProjects/TransT_KYLE/datasets"
+    dataset_base_path = os.path.join(__PROJECT_ROOT_PATH__, "datasets")
     net_base_path = "/home/kyle/PycharmProjects/TransT_KYLE/pytracking/networks"
     if args.dataset in ["CVPR13", "OTB50", "OTB100"]:
         dataset_root = os.path.join(dataset_base_path, "OTB100")
         net_path = os.path.join(net_base_path, "transt.pth")
+        ffn_data_path = os.path.join(__PROJECT_ROOT_PATH__, "acmmm23_dev", "ffn_data", "OTB100")
     elif args.dataset == "UAV123":
         dataset_root = os.path.join(dataset_base_path, "UAV123", "data_seq", "UAV123")
         net_path = os.path.join(net_base_path, "transt.pth")
+        ffn_data_path = os.path.join(__PROJECT_ROOT_PATH__, "acmmm23_dev", "ffn_data", "UAV123")
     elif args.dataset == "GOT-10k":
         dataset_root = os.path.join(dataset_base_path, "GOT-10k", "test")
         net_path = os.path.join(net_base_path, "TransT_GOT.pth")
+        ffn_data_path = os.path.join(__PROJECT_ROOT_PATH__, "acmmm23_dev", "ffn_data", "GOT-10k")
     elif args.dataset == "LaSOT":
         dataset_root = os.path.join(dataset_base_path, "LaSOT")
         net_path = os.path.join(net_base_path, "transt.pth")
+        ffn_data_path = os.path.join(__PROJECT_ROOT_PATH__, "acmmm23_dev", "ffn_data", "LaSOT")
     else:
         raise NotImplementedError()
+
+    # Check if "ffn_data_path" exists, and make if not
+    if os.path.isdir(ffn_data_path) is False:
+        os.makedirs(ffn_data_path)
 
     # create model
     net = NetWithBackbone(net_path=net_path, use_gpu=True)
     tracker = Tracker(name='transt', net=net, window_penalty=0.49, exemplar_size=128, instance_size=256)
 
     # create dataset
-    dataset = DatasetFactory.create_dataset(name=args.dataset,
-                                            dataset_root=dataset_root,
-                                            load_img=False)
+    dataset = DatasetFactory.create_dataset(name=args.dataset, dataset_root=dataset_root, load_img=False)
 
     model_name = args.name
     total_lost = 0
@@ -151,7 +166,15 @@ def main():
             pred_bboxes = []
             scores = []
             track_times = []
-            for idx, (img, gt_bbox) in enumerate(video):
+            video_ffn_analysis = {"gt_bboxes": [], "trk_bboxes": [], "ffn_outputs": []}
+
+            # Declare tqdm iteration object
+            video_tqdm_iter = tqdm(
+                video, desc="({}/{}) Running Video [{}]".format(v_idx+1, len(dataset), video.name),
+                leave=True, total=len(video)-1
+            )
+
+            for idx, (img, gt_bbox) in enumerate(video_tqdm_iter):
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # noqa
                 tic = cv2.getTickCount() # noqa
                 if idx == 0:
@@ -165,11 +188,23 @@ def main():
                         pred_bboxes.append([1])
                     else:
                         pred_bboxes.append(pred_bbox)
+                    # Append "None" for first frame FFN output
+                    if args.save_ffn_feats:
+                        video_ffn_analysis["ffn_outputs"].append(None)
+                        video_ffn_analysis["gt_bboxes"].append(np.array(center2corner([cx, cy, w, h])))
+                        video_ffn_analysis["trk_bboxes"].append(np.array(center2corner([cx, cy, w, h])))
                 else:
                     outputs = tracker.track(img)
                     pred_bbox = outputs['target_bbox']
                     pred_bboxes.append(pred_bbox)
                     scores.append(outputs['best_score'])
+                    # Convert "gt_bbox"
+                    cx, cy, w, h = get_axis_aligned_bbox(np.array(gt_bbox))
+                    # Append FFN output for this frame
+                    if args.save_ffn_feats:
+                        video_ffn_analysis["ffn_outputs"].append(outputs["FFN_output"].squeeze().cpu().numpy())
+                        video_ffn_analysis["gt_bboxes"].append(np.array(center2corner([cx, cy, w, h])))
+                        video_ffn_analysis["trk_bboxes"].append(np.array(center2corner(np.concatenate(rect_2_cxy_wh(pred_bbox)))))
                 toc += cv2.getTickCount() - tic # noqa
                 track_times.append((cv2.getTickCount() - tic)/cv2.getTickFrequency()) # noqa
                 if idx == 0:
@@ -183,7 +218,37 @@ def main():
                     cv2.putText(img, str(idx), (40, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2) # noqa
                     cv2.imshow(video.name, img) # noqa
                     cv2.waitKey(1) # noqa
+
+                # Compute Memory Percent
+                curr_memory_percent = psutil.virtual_memory().percent
+
+                # Set tqdm postfix
+                video_tqdm_iter.set_postfix({
+                    "FIDX": "({}/{})".format(idx+1, len(video)),
+                    "RAM Memory": "{:.2f}%".format(curr_memory_percent),
+                })
+
+            # Toc
             toc /= cv2.getTickFrequency() # noqa
+
+            if args.save_ffn_feats:
+                # Stack(concat) Saving Variables
+                gt_bboxes = np.vstack(video_ffn_analysis["gt_bboxes"])
+                trk_bboxes = np.vstack(video_ffn_analysis["trk_bboxes"])
+                ffn_outputs = np.dstack(video_ffn_analysis["ffn_outputs"][1:]).transpose(2, 0, 1)
+
+                # Make Directory for Current Video
+                curr_video_ffn_data_path = os.path.join(ffn_data_path, video.name)
+                if os.path.isdir(curr_video_ffn_data_path) is False:
+                    os.makedirs(curr_video_ffn_data_path)
+
+                # Save *.npy files
+                np.save(os.path.join(curr_video_ffn_data_path, "gt_bboxes.npy"), gt_bboxes)
+                np.save(os.path.join(curr_video_ffn_data_path, "trk_bboxes.npy"), trk_bboxes)
+                np.save(os.path.join(curr_video_ffn_data_path, "ffn_outputs.npy"), ffn_outputs)
+
+            # Close tqdm iteration object
+            video_tqdm_iter.close()
 
             # === Save Results === #
             if args.save:
