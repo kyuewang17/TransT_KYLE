@@ -30,6 +30,8 @@ class BENCHMARK_FFN_OBJECT(object):
         labeling_type = kwargs.get("labeling_type")
         is_auto_labeling = kwargs.get("is_auto_labeling", False)
         assert isinstance(is_auto_labeling, bool)
+        is_drop_hier_objs = kwargs.get("is_drop_hier_objs", False)
+        assert isinstance(is_drop_hier_objs, bool)
 
         # Set Root Path
         self.root_path = root_path
@@ -42,14 +44,16 @@ class BENCHMARK_FFN_OBJECT(object):
         if video_indices is not None:
             video_names = [video_name for v_idx, video_name in enumerate(video_names) if v_idx in video_indices]
         video_paths = [os.path.join(root_path, vn) for vn in video_names]
+        self.video_indices, self.video_names = video_indices, video_names
 
         # Initialize tqdm iteration object
         bench_tqdm_iter_obj = tqdm(
-            video_names, desc="Loading FFN Data for Benchmark [{}]".format(benchmark), leave=False
+            video_names, desc="Loading FFN Data for Benchmark [{}]".format(benchmark), leave=True
         )
 
         # Initialize list of "VIDEO_FFN_OBJ"
         self.video_ffn_objs = []
+        accum_sample_numbers = 0
         for video_idx, video_name in enumerate(bench_tqdm_iter_obj):
             video_path = video_paths[video_idx]
             self.video_ffn_objs.append(
@@ -59,18 +63,25 @@ class BENCHMARK_FFN_OBJECT(object):
                 )
             )
 
+            # Accumulate Sample Numbers
+            accum_sample_numbers += len(self.video_ffn_objs[-1])
+
             # Compute Memory Percent
             curr_memory_percent = psutil.virtual_memory().percent
 
             # Set tqdm postfix
             bench_tqdm_iter_obj.set_postfix({
                 "Video": video_name,
+                "Accum. Sample Number": "{:,}".format(accum_sample_numbers),
                 "RAM Memory": "{:.2f}%".format(curr_memory_percent),
             })
 
         # Concatenate all IoUs and FFN outputs
+        self.video_frame_lens = []
         gathered_overlap, gathered_ffn_outputs = [], []
         for video_ffn_obj in self.video_ffn_objs:
+            self.video_frame_lens.append(len(video_ffn_obj))
+
             # Gathered IoU
             video_overlaps = video_ffn_obj.overlaps
             gathered_overlap.append(video_overlaps)
@@ -100,11 +111,15 @@ class BENCHMARK_FFN_OBJECT(object):
                 labeling_type=labeling_type, is_recursive_setting=True
             )
 
+        # Drop hierarchical objects
+        if is_drop_hier_objs:
+            self.video_ffn_objs = []
+
     def __repr__(self):
         return self.benchmark
 
     def __len__(self):
-        return len(self.video_ffn_objs)
+        return len(self.gathered_overlap)
 
     def set_overlap(self, overlap_thresholds, is_recursive_setting=False):
         # Check Threshold Validity and Modify appropriately if not so wrong.
@@ -135,6 +150,9 @@ class BENCHMARK_FFN_OBJECT(object):
 
         # For Recursive Setting
         if is_recursive_setting:
+            if len(self.video_ffn_objs) == 0:
+                raise AssertionError()
+
             # Iterate for "self.video_ffn_objs"
             for video_ffn_obj in self.video_ffn_objs:
                 # Set Overlap
@@ -177,6 +195,9 @@ class BENCHMARK_FFN_OBJECT(object):
 
         # For Recursive Setting
         if is_recursive_setting:
+            if len(self.video_ffn_objs) == 0:
+                raise AssertionError()
+
             # Iterate for "self.video_ffn_objs"
             for video_ffn_obj in self.video_ffn_objs:
                 # Set Label
@@ -251,6 +272,9 @@ class VIDEO_FFN_OBJECT(object):
             raise StopIteration
         self.__iter_counter += 1
         return ret_val
+
+    def drop_hier_objs(self):
+        self.frame_ffn_objs = []
 
     def set_overlap(self, overlap_thresholds, is_recursive_setting=False):
         # Check Threshold Validity and Modify appropriately if not so wrong.

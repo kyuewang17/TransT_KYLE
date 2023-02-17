@@ -40,8 +40,174 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
             new_video_ffn_objs.append(_OBJ)
         self.video_ffn_objs = new_video_ffn_objs
 
-    def plot_data(self, **kwargs):
+    def analyze_ffn_pca(self, **kwargs):
+        """
+        Codes referred: https://builtin.com/data-science/tsne-python
 
+        """
+        import pandas as pd
+        import seaborn as sns
+        from sklearn.decomposition import PCA
+        from mpl_toolkits.mplot3d import Axes3D
+
+        # Unpack KWARGS
+        overlap_thresholds = kwargs.get("overlap_thresholds")
+        if overlap_thresholds is not None:
+            assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
+            labels = []
+            for overlap in self.gathered_overlap:
+                label = np.zeros(len(overlap_thresholds) + 1).astype(int)
+                for i_idx, overlap_thresh in enumerate(overlap_thresholds):
+                    if overlap < overlap_thresh:
+                        np.add.at(label, [i_idx], 1)
+                    detect_true_label = np.where(label == 1)[0]
+                    if len(detect_true_label) > 0:
+                        break
+                if label.max() == 0:
+                    label[-1] = 1
+                if self.labeling_type == "scalar":
+                    label = label.argmax()
+                labels.append(label)
+        else:
+            labels = self.gathered_samples_label
+
+        pca_components = kwargs.get("pca_components", 3)
+        random_seed = kwargs.get("random_seed")
+        if random_seed is not None:
+            assert isinstance(random_seed, int) and random_seed >= 0
+            np.random.seed(random_seed)
+
+        # Plotting KWARGS
+        scatter_size = kwargs.get("scatter_size")
+        if scatter_size is not None:
+            assert isinstance(scatter_size, float)
+        cmap_name = kwargs.get("cmap_name", "bwr_r")
+        # trunc_flen = kwargs.get("trunc_flen", 10)
+        elev_3d, azim_3d = kwargs.get("elev_3d", 15), kwargs.get("azim_3d", -45)
+
+        save_base_path = kwargs.get("save_base_path")
+        is_save_mode = kwargs.get("is_save_mode", False)
+        if save_base_path is not None:
+            if is_save_mode:
+                assert os.path.isdir(save_base_path)
+        save_format = kwargs.get("save_format", "png")
+
+        # Convert Label format to "scalar"
+        if self.labeling_type == "one_hot":
+            labels = labels.argmax(axis=1)
+
+        # Find initial frame indices according to "np.nan" in "self.gathered_ffn_outputs"
+        init_fidx_indices = \
+            np.argwhere(np.isnan(self.gathered_ffn_outputs.reshape(len(labels), -1)).all(axis=1))
+        init_fidx_indices = init_fidx_indices.reshape(-1).tolist()
+
+        # Prepare Column and Row(row_indices) for DataFrame
+        col_elems = []
+        for spat_idx in range(self.gathered_ffn_outputs.shape[1]):
+            for ch_idx in range(self.gathered_ffn_outputs.shape[2]):
+                col_elems.append("s_{}__c_{}".format(spat_idx, ch_idx))
+
+        row_indices = []
+        for video_idx, video_frame_len in enumerate(self.video_frame_lens):
+            for video_fidx in range(video_frame_len):
+                row_idx_comp = "[{}]-[{:4d}]".format(self.video_names[video_idx], video_fidx)
+                row_indices.append(row_idx_comp)
+
+        # Select non-initial frame indices
+        self.gathered_ffn_outputs = \
+            np.delete(self.gathered_ffn_outputs, init_fidx_indices, axis=0)
+        self.gathered_overlap = np.delete(self.gathered_overlap, init_fidx_indices)
+        labels = np.delete(labels, init_fidx_indices)
+        row_indices = \
+            [row_idx for jj, row_idx in enumerate(row_indices) if jj not in init_fidx_indices]
+
+        # === Prepare Data via pd.DataFrame === #
+        # self.gathered_ffn_outputs = self.gathered_ffn_outputs[:trunc_flen]
+        # row_indices = row_indices[:trunc_flen]
+        # labels = labels[:trunc_flen]
+        df = pd.DataFrame(
+            self.gathered_ffn_outputs.reshape(self.gathered_ffn_outputs.shape[0], -1),
+            columns=col_elems, index=row_indices
+        )
+        df["y"] = labels
+        df["labels"] = df["y"].apply(lambda j: str(j))
+
+        # Random Permutation
+        rand_perm = np.random.permutation(df.shape[0])
+
+        # === Analyze via PCA === #
+        pca = PCA(n_components=pca_components)
+        pca_result = pca.fit_transform(df[col_elems].values)
+
+        for pca_comp_idx in range(pca_components):
+            curr_pca_result = pca_result[:, pca_comp_idx]
+            df["pca_{}".format(pca_comp_idx+1)] = curr_pca_result
+
+        # Set Analyze Targets String
+        analyze_targets = "{}_[{}-{}]".format(self.benchmark, self.video_indices[0], self.video_indices[-1])
+
+        # === Draw Analyzed Result === #
+        if pca_components == 2:
+            raise NotImplementedError()
+
+        elif pca_components >= 3:
+            # Init plt figure
+            fig_pca = plt.figure(dpi=200)
+            ax_pca = fig_pca.add_subplot(111, projection="3d")
+
+            # Choose df["pca_X"]
+            if pca_components >= 4:
+                raise NotImplementedError()
+            else:
+                scatter_dict = {
+                    "xs": df["pca_1"].values[rand_perm],
+                    "ys": df["pca_2"].values[rand_perm],
+                    "zs": df["pca_3"].values[rand_perm],
+                    "c": df["y"].values[rand_perm],
+                }
+
+            # Plot Scatter to Ax
+            ax_pca.scatter(
+                xs=scatter_dict["xs"], ys=scatter_dict["ys"], zs=scatter_dict["zs"],
+                c=scatter_dict["c"], cmap=cmap_name, s=scatter_size,
+            )
+
+            # Set Labels
+            ax_pca.set_xlabel("pca_1")
+            ax_pca.set_ylabel("pca_2")
+            ax_pca.set_zlabel("pca_3")
+
+            # Set Figure Title
+            ax_pca.set_title(analyze_targets)
+
+        else:
+            raise NotImplementedError()
+
+        # Save Plot
+        if is_save_mode:
+            plt.savefig(
+                os.path.join(save_base_path, "{}.{}".format(analyze_targets, save_format))
+            )
+        else:
+            plt.show()
+
+        plt.close(fig_pca)
+
+    def analyze_ffn_tsne(self, **kwargs):
+        """
+        Codes referred: https://builtin.com/data-science/tsne-python
+
+        """
+        import pandas as pd
+        import seaborn as sns
+
+
+
+
+
+
+
+    def old_plot_data(self, **kwargs):
 
         # Assertion
 
@@ -81,17 +247,6 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
             # plt.imshow(sampled_ffn_outputs.mean(axis=1), cmap="jet", interpolation="nearest")
             plt.imshow(sampled_ffn_outputs.std(axis=1), cmap="jet", interpolation="nearest")
             plt.show()
-
-            print(123)
-
-            # # for statistical analysis,
-            # if mode == "statistics":
-            #     plot_samples =
-
-            # TODO: Plot with the following methods...
-            #       (1) - Statistical Terms (mean, max, std)
-            #       (2) - High-dimensional Visualization Tools (t-SNE)
-
 
 
 class FFN_ANALYSIS_VIDEO_OBJ(VIDEO_FFN_OBJECT):
@@ -182,24 +337,146 @@ class FFN_ANALYSIS_VIDEO_OBJ(VIDEO_FFN_OBJECT):
         # Close Figure
         plt.close(fig=fig_stats)
 
+    def analyze_ffn_pca(self, **kwargs):
+        """
+        Codes referred: https://builtin.com/data-science/tsne-python
 
+        """
+        import pandas as pd
+        import seaborn as sns
+        from sklearn.decomposition import PCA
+        from mpl_toolkits.mplot3d import Axes3D
 
+        # Unpack KWARGS
+        overlap_thresholds = kwargs.get("overlap_thresholds")
+        if overlap_thresholds is not None:
+            assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
+            labels = []
+            for overlap in self.overlaps:
+                label = np.zeros(len(overlap_thresholds) + 1).astype(int)
+                for i_idx, overlap_thresh in enumerate(overlap_thresholds):
+                    if overlap < overlap_thresh:
+                        np.add.at(label, [i_idx], 1)
+                    detect_true_label = np.where(label == 1)[0]
+                    if len(detect_true_label) > 0:
+                        break
+                if label.max() == 0:
+                    label[-1] = 1
+                if self.labeling_type == "scalar":
+                    label = label.argmax()
+                labels.append(label)
+        else:
+            labels = self.labels
+
+        pca_components = kwargs.get("pca_components", 3)
+        random_seed = kwargs.get("random_seed")
+        if random_seed is not None:
+            assert isinstance(random_seed, int) and random_seed >= 0
+            np.random.seed(random_seed)
+        cmap_name = kwargs.get("cmap_name", "jet")
+        # trunc_flen = kwargs.get("trunc_flen", 10)
+
+        save_base_path = kwargs.get("save_base_path")
+        is_save_mode = kwargs.get("is_save_mode", False)
+        if save_base_path is not None:
+            if is_save_mode:
+                assert os.path.isdir(save_base_path)
+        save_format = kwargs.get("save_format", "png")
+
+        # === Prepare Dataset via pd.DataFrame === #
+        # Remove First Frame
+        labels = labels[1:]
+
+        # Change Label Type to "Scalar" if "One_hot"
+        if self.labeling_type == "one_hot":
+            labels = labels.argmax(axis=1)
+
+        # === Truncated Length
+        # labels = labels[:trunc_flen]
+
+        # Get FFN outputs and Flatten
+        ffn_outputs = self.get_ffn_outputs(include_init=False)
+        # ffn_outputs = ffn_outputs[:trunc_flen]
+        col_elems = []
+        for spat_idx in range(ffn_outputs.shape[1]):
+            for ch_idx in range(ffn_outputs.shape[2]):
+                col_elems.append("spat_{}__ch_{}".format(spat_idx, ch_idx))
+        row_indices = ["fidx_{}".format(j + 1) for j in range(ffn_outputs.shape[0])]
+        ffn_outputs = ffn_outputs.reshape(ffn_outputs.shape[0], -1)
+
+        # Initialize DataFrame
+        df = pd.DataFrame(ffn_outputs, columns=col_elems, index=row_indices)
+        df["y"] = labels
+        df["label"] = df["y"].apply(lambda i: str(i))
+
+        # Random Permutation
+        rndperm = np.random.permutation(df.shape[0])
+
+        # === Analyze via PCA === #
+        pca = PCA(n_components=pca_components)
+        pca_result = pca.fit_transform(df[col_elems].values)
+
+        for pca_comp_idx in range(pca_components):
+            curr_pca_result = pca_result[:, pca_comp_idx]
+            df["pca_{}".format(pca_comp_idx+1)] = curr_pca_result
+
+        # === Draw Analyzed Result === #
+        if pca_components == 2:
+            raise NotImplementedError()
+
+        elif pca_components >= 3:
+            # Init plt figure
+            fig_pca = plt.figure(dpi=200)
+            ax_pca = fig_pca.add_subplot(111, projection="3d")
+
+            # Choose df["pca_X"]
+            if pca_components >= 4:
+                raise NotImplementedError()
+            else:
+                scatter_dict = {
+                    "xs": df["pca_1"].values[rndperm],
+                    "ys": df["pca_2"].values[rndperm],
+                    "zs": df["pca_3"].values[rndperm],
+                    "c": df["y"].values[rndperm],
+                }
+
+            # Plot Scatter to Ax
+            ax_pca.scatter(
+                xs=scatter_dict["xs"], ys=scatter_dict["ys"], zs=scatter_dict["zs"],
+                c=scatter_dict["c"], cmap=cmap_name,
+            )
+
+            # Set Labels
+            ax_pca.set_xlabel("pca_1")
+            ax_pca.set_ylabel("pca_2")
+            ax_pca.set_zlabel("pca_3")
+
+            # Set Figure Title
+            ax_pca.set_title("{}".format(self.video_name))
+
+        # # Plot Show
+        # plt.show()
+
+        # Save Plot
+        if is_save_mode:
+            plt.savefig(
+                os.path.join(save_base_path, "{}.{}".format(self.video_name, save_format))
+            )
+        else:
+            plt.show()
+
+        plt.close(fig_pca)
+
+    def analyze_ffn_tsne(self, **kwargs):
+        raise NotImplementedError()
 
 
 if __name__ == "__main__":
     # FFN Data Path
     ffn_data_path = os.path.join(__FFN_DATA_ROOT_PATH__, __BENCHMARK_DATASET__)
 
-    # Set Iteration Dictionary
-    iter_dict = {
-        "1": np.arange(0, 10), "2": np.arange(10, 20), "3": np.arange(20, 30),
-        "4": np.arange(30, 40), "5": np.arange(40, 50), "6": np.arange(50, 60),
-        "7": np.arange(60, 70), "8": np.arange(70, 80), "9": np.arange(80, 90),
-        "10": np.arange(90, 100)
-    }
-
     N_bench = len(os.listdir(ffn_data_path))
-    iter_numbers = 20
+    iter_numbers = 25
     iter_interval = N_bench // iter_numbers
 
     iter_indices_arr = []
@@ -210,6 +487,8 @@ if __name__ == "__main__":
 
     # For every iteration, initialize FFN Analysis Objects
     for idx, iter_indices in enumerate(iter_indices_arr):
+        # if min(iter_indices) != 36:
+        #     continue
 
         # Initialize FFN Analysis Object
         FFN_ANALYSIS_OBJ = FFN_ANALYSIS_BENCHMARK_OBJ(
@@ -221,16 +500,32 @@ if __name__ == "__main__":
 
             # Labeling-related Arguments
             labeling_type="one_hot", is_auto_labeling=True,
-        )
-        FFN_ANALYSIS_OBJ.reinit()
 
-        # Iterate for FFN Analysis Object of Current "iter_dict"
-        for idx2 in range(len(FFN_ANALYSIS_OBJ.video_ffn_objs)):
-            FFN_ANALYSIS_OBJ.video_ffn_objs[idx2].analyze_video_ffn(
-                is_save_mode=True,
-                # save_base_path=os.path.join(__FFN_ANALYSIS_SAVE_PATH__, "002__otb_video_spatial_statistics"),
-                save_base_path=os.path.join(__FFN_ANALYSIS_SAVE_PATH__, "002__uav_video_spatial_statistics"),
+            # Drop(delete) hierarchical objects
+            is_drop_hier_objs=True,
+        )
+        # FFN_ANALYSIS_OBJ.reinit()
+
+        # Adjoin Save Base Path
+        if __BENCHMARK_DATASET__ == "OTB100":
+            save_base_path = os.path.join(
+                __FFN_ANALYSIS_SAVE_PATH__, "003__otb_video_pca_analysis"
             )
+
+        elif __BENCHMARK_DATASET__ == "UAV123":
+            save_base_path = os.path.join(
+                __FFN_ANALYSIS_SAVE_PATH__, "003__uav_video_pca_analysis"
+            )
+
+        else:
+            raise NotImplementedError()
+
+        # Analyze FFN PCA
+        FFN_ANALYSIS_OBJ.analyze_ffn_pca(
+            scatter_size=0.5,
+
+            save_base_path=save_base_path, is_save_mode=True,
+        )
 
         # Delete Current Iteration's FFN Analysis Objects (RAM Memory Issue)
         del FFN_ANALYSIS_OBJ
