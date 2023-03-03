@@ -30,11 +30,11 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
         new_video_ffn_objs = []
         for video_ffn_obj in self.video_ffn_objs:
             _OBJ = FFN_ANALYSIS_VIDEO_OBJ(
-                    video_name=video_ffn_obj.video_name, video_path=video_ffn_obj.video_path,
-                    benchmark=video_ffn_obj.benchmark,
-                    overlap_criterion=video_ffn_obj.overlap_criterion,
-                    overlap_thresholds=video_ffn_obj.overlap_thresholds,
-                    labeling_type=video_ffn_obj.labeling_type,
+                video_name=video_ffn_obj.video_name, video_path=video_ffn_obj.video_path,
+                benchmark=video_ffn_obj.benchmark,
+                overlap_criterion=video_ffn_obj.overlap_criterion,
+                overlap_thresholds=video_ffn_obj.overlap_thresholds,
+                labeling_type=video_ffn_obj.labeling_type,
             )
             _OBJ.set_label(labeling_type=video_ffn_obj.labeling_type)
             new_video_ffn_objs.append(_OBJ)
@@ -45,10 +45,19 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
         Codes referred: https://builtin.com/data-science/tsne-python
 
         """
+        from utils.plotstyle import PlotStyleObj
         import pandas as pd
         import seaborn as sns
         from sklearn.decomposition import PCA
         from mpl_toolkits.mplot3d import Axes3D
+        from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
+
+        # Initialize PlotStyleObj
+        plt_style_obj = PlotStyleObj(
+            plt_style_activation_list=["color"],
+            is_color_normalize=True,
+        )
 
         # Unpack KWARGS
         overlap_thresholds = kwargs.get("overlap_thresholds")
@@ -68,6 +77,7 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
                 if self.labeling_type == "scalar":
                     label = label.argmax()
                 labels.append(label)
+            labels = np.array(labels)
         else:
             labels = self.gathered_samples_label
 
@@ -81,7 +91,8 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
         scatter_size = kwargs.get("scatter_size")
         if scatter_size is not None:
             assert isinstance(scatter_size, float)
-        cmap_name = kwargs.get("cmap_name", "bwr_r")
+
+        # colors = kwargs.get("cmap_name")
         # trunc_flen = kwargs.get("trunc_flen", 10)
         elev_3d, azim_3d = kwargs.get("elev_3d", 15), kwargs.get("azim_3d", -45)
 
@@ -95,6 +106,36 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
         # Convert Label format to "scalar"
         if self.labeling_type == "one_hot":
             labels = labels.argmax(axis=1)
+
+        # Truncate Plot Style Object
+        colors, legends = [], {}
+        for label in labels:
+            color = np.array(plt_style_obj[label]["color"])
+            colors.append(color)
+            if label not in legends.keys():
+                legends[label] = {}
+                if label == 0:
+                    legend_str = "[0_{}]".format(overlap_thresholds[label])
+                elif label == len(overlap_thresholds):
+                    legend_str = "[{}_1]".format(overlap_thresholds[label - 1])
+                else:
+                    legend_str = "[{}_{}]".format(
+                        overlap_thresholds[label - 1], overlap_thresholds[label]
+                    )
+                legends[label]["legend_str"] = legend_str
+                legends[label]["color"] = color
+        colors = np.array(colors)
+        legends = dict(sorted(legends.items()))
+
+        # Set Legend Elements
+        legend_elements = []
+        for label, legend_key in legends.items():
+            legend_elements.append(
+                Line2D(
+                    [0], [0], marker="o", color="w", label=legend_key["legend_str"],
+                    markerfacecolor=legend_key["color"], markersize=5
+                )
+            )
 
         # Find initial frame indices according to "np.nan" in "self.gathered_ffn_outputs"
         init_fidx_indices = \
@@ -120,6 +161,7 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
         labels = np.delete(labels, init_fidx_indices)
         row_indices = \
             [row_idx for jj, row_idx in enumerate(row_indices) if jj not in init_fidx_indices]
+        colors = np.delete(colors, init_fidx_indices, axis=0)
 
         # === Prepare Data via pd.DataFrame === #
         # self.gathered_ffn_outputs = self.gathered_ffn_outputs[:trunc_flen]
@@ -163,13 +205,15 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
                     "xs": df["pca_1"].values[rand_perm],
                     "ys": df["pca_2"].values[rand_perm],
                     "zs": df["pca_3"].values[rand_perm],
-                    "c": df["y"].values[rand_perm],
+                    # "c": df["y"].values[rand_perm],
+                    "c": colors[rand_perm, :],
                 }
 
             # Plot Scatter to Ax
             ax_pca.scatter(
                 xs=scatter_dict["xs"], ys=scatter_dict["ys"], zs=scatter_dict["zs"],
-                c=scatter_dict["c"], cmap=cmap_name, s=scatter_size,
+                c=scatter_dict["c"], s=scatter_size,
+                cmap=colors
             )
 
             # Set Labels
@@ -179,6 +223,9 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
 
             # Set Figure Title
             ax_pca.set_title(analyze_targets)
+
+            # Set Legends
+            ax_pca.legend(handles=legend_elements, fontsize=8, loc='lower center')
 
         else:
             raise NotImplementedError()
@@ -190,6 +237,7 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
             )
         else:
             plt.show()
+        # plt.show()
 
         plt.close(fig_pca)
 
@@ -201,11 +249,7 @@ class FFN_ANALYSIS_BENCHMARK_OBJ(BENCHMARK_FFN_OBJECT):
         import pandas as pd
         import seaborn as sns
 
-
-
-
-
-
+        raise NotImplementedError()
 
     def old_plot_data(self, **kwargs):
 
@@ -477,6 +521,7 @@ if __name__ == "__main__":
 
     N_bench = len(os.listdir(ffn_data_path))
     iter_numbers = 25
+    # iter_numbers = 20
     iter_interval = N_bench // iter_numbers
 
     iter_indices_arr = []
@@ -509,21 +554,24 @@ if __name__ == "__main__":
         # Adjoin Save Base Path
         if __BENCHMARK_DATASET__ == "OTB100":
             save_base_path = os.path.join(
-                __FFN_ANALYSIS_SAVE_PATH__, "003__otb_video_pca_analysis"
+                __FFN_ANALYSIS_SAVE_PATH__, "004__otb_video_pca_analysis"
             )
 
         elif __BENCHMARK_DATASET__ == "UAV123":
             save_base_path = os.path.join(
-                __FFN_ANALYSIS_SAVE_PATH__, "003__uav_video_pca_analysis"
+                __FFN_ANALYSIS_SAVE_PATH__, "004__uav_video_pca_analysis"
             )
 
         else:
             raise NotImplementedError()
 
+        # Manual IoU Thresholds
+        manual_iou_thresholds = [0.2, 0.4, 0.6, 0.8]
+
         # Analyze FFN PCA
         FFN_ANALYSIS_OBJ.analyze_ffn_pca(
             scatter_size=0.5,
-
+            overlap_thresholds=manual_iou_thresholds,
             save_base_path=save_base_path, is_save_mode=True,
         )
 

@@ -3,8 +3,10 @@ from __future__ import absolute_import, print_function
 import os
 import psutil
 import numpy as np
+from copy import deepcopy
 from tqdm import tqdm
 from utils.bbox import IoU
+from utils.rect_metrics import rect_iou, rect_diou
 
 
 __FFN_DATA_ROOT_PATH__ = "/home/kyle/PycharmProjects/TransT_KYLE/acmmm23_dev/ffn_data"
@@ -139,7 +141,7 @@ class BENCHMARK_FFN_OBJECT(object):
             elif self.overlap_criterion == "giou":
                 raise NotImplementedError()
             elif self.overlap_criterion == "diou":
-                raise NotImplementedError()
+                assert -1 <= overlap_threshold <= 1
             else:
                 raise AssertionError()
         self.overlap_thresholds = sorted(overlap_thresholds)
@@ -294,7 +296,7 @@ class VIDEO_FFN_OBJECT(object):
             elif self.overlap_criterion == "giou":
                 raise NotImplementedError()
             elif self.overlap_criterion == "diou":
-                raise NotImplementedError()
+                assert -1 <= overlap_threshold <= 1
             else:
                 raise AssertionError()
         self.overlap_thresholds = sorted(overlap_thresholds)
@@ -368,18 +370,21 @@ class FRAME_FFN_OBJECT(object):
         labeling_type = kwargs.get("labeling_type")
 
         # Set "ffn_output", "gt_bbox", and "trk_bbox"
-        self.ffn_output, self.gt_bbox, self.trk_bbox = ffn_output, gt_bbox, trk_bbox
+        self.ffn_output = ffn_output
+        gt_bbox[2], gt_bbox[3] = gt_bbox[2] - gt_bbox[0], gt_bbox[3] - gt_bbox[1]
+        trk_bbox[2], trk_bbox[3] = trk_bbox[2] - trk_bbox[0], trk_bbox[3] - trk_bbox[1]
+        self.gt_bbox, self.trk_bbox = deepcopy(gt_bbox), deepcopy(trk_bbox)
 
         # Overlap Thresholds & Criterion
         self.overlap_thresholds, self.overlap_criterion = overlap_thresholds, overlap_criterion
 
         # Compute Overlap btw GT and TRK BBOXES
         if overlap_criterion == "iou":
-            self.overlap = IoU(gt_bbox, trk_bbox)
+            self.overlap = rect_iou(gt_bbox, trk_bbox)
         elif overlap_criterion == "giou":
             raise NotImplementedError()
         elif overlap_criterion == "diou":
-            raise NotImplementedError()
+            self.overlap = rect_diou(gt_bbox, trk_bbox)
         else:
             raise AssertionError()
 
@@ -425,7 +430,7 @@ class FRAME_FFN_OBJECT(object):
             elif self.overlap_criterion == "giou":
                 raise NotImplementedError()
             elif self.overlap_criterion == "diou":
-                raise NotImplementedError()
+                assert -1 <= overlap_threshold <= 1
             else:
                 raise AssertionError()
         self.overlap_thresholds = sorted(overlap_thresholds)
@@ -471,7 +476,9 @@ if __name__ == "__main__":
         load_video_indices=[0, 1, 2, 3],
 
         # Overlap-related Arguments
-        overlap_criterion="iou", overlap_thresholds=[0.5],
+        overlap_criterion="iou",
+        overlap_thresholds=[0.5],
+        # overlap_thresholds=[0.0],
 
         # Labeling-related Arguments
         labeling_type="one_hot", is_auto_labeling=True,
