@@ -201,7 +201,7 @@ if __name__ == "__main__":
     )
 
     # Wrap with Test Loader
-    trk_dataset = TEST_DATASET(data_obj=trk_data_obj, logger=_logger)
+    trk_dataset = TEST_DATASET(data_obj=trk_data_obj, logger=_logger, init_mode="data_obj")
 
     # Run MLP Model Code
     run_mlp_model(

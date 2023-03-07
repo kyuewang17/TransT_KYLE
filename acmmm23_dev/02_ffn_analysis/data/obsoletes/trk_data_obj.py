@@ -12,12 +12,8 @@ from PIL import Image
 import torch
 import torch.nn as nn
 
-try:
-    from .utils import set_logger
-    from .utils.rect_metrics import rect_iou, rect_diou
-except ImportError:
-    from utils import set_logger
-    from utils.rect_metrics import rect_iou, rect_diou
+from .utils import set_logger
+from .utils.rect_metrics import rect_iou, rect_diou
 
 
 # Set Important Paths
@@ -102,7 +98,7 @@ class BENCHMARK_DATA_OBJ(object):
             video_data_obj = VIDEO_DATA_OBJ(
                 root_path=video_path, benchmark=benchmark, video_name=video_name, logger=logger,
                 overlap_criterion=overlap_criterion, overlap_thresholds=overlap_thresholds,
-                labeling_type=labeling_type, device=device
+                labeling_type=labeling_type,
             )
             video_data_obj.set_labels()
             self.video_data_objs.append(video_data_obj)
@@ -144,31 +140,11 @@ class BENCHMARK_DATA_OBJ(object):
 
         # Random Permutation for Shuffling
         rand_perm = np.random.permutation(len(self))
-        self.rand_perm = rand_perm
 
         # Permute Important Variables w.r.t. "rand_perm"
         self.ffn_filepaths = [self.ffn_filepaths[j] for j in rand_perm]
         self.overlaps, self.labels = self.overlaps[rand_perm], self.labels[rand_perm]
         self.gt_bboxes, self.trk_bboxes = self.gt_bboxes[rand_perm], self.trk_bboxes[rand_perm]
-
-        # Load Numpy Arrays via Load Mode of "mmap"
-        self.ffn_mmaps = []
-        mmap_load_tqdm_iter = tqdm(
-            self.ffn_filepaths, desc="Loading Fusion Vectors via MMAP Mode...!", leave=True
-        )
-        for ffn_filepath in mmap_load_tqdm_iter:
-            # Load via MMAP Mode
-            self.ffn_mmaps.append(np.load(ffn_filepath, mmap_mode="c"))
-
-            # Compute Memory Percent
-            curr_memory_percent = psutil.virtual_memory().percent
-            if curr_memory_percent > __MEMORY_CUTOFF_PERCENT__:
-                raise OverflowError("Memory Critical...!")
-
-            # Set tqdm postfix
-            mmap_load_tqdm_iter.set_postfix({
-                "RAM Memory": "{:.2f}%".format(curr_memory_percent),
-            })
 
         # Iteration Counter
         self.__iter_counter = 0
@@ -184,7 +160,7 @@ class BENCHMARK_DATA_OBJ(object):
         if isinstance(item, int):
             assert 0 <= item < len(self)
             return {
-                "ffn_filepath": self.ffn_filepaths[item], "ffn_mmap": self.ffn_mmaps[item],
+                "ffn_filepath": self.ffn_filepaths[item],
                 "overlap": self.overlaps[item], "label": self.labels[item],
                 "gt_bbox": self.gt_bboxes[item], "trk_bbox": self.trk_bboxes[item],
                 "miscs": {
@@ -220,31 +196,7 @@ class BENCHMARK_DATA_OBJ(object):
         self.__iter_counter += 1
         return ret_val
 
-    def _revert_shuffling(self):
-        def invert_permutation(p):
-            """Return an array s with which np.array_equal(arr[p][s], arr) is True.
-            The array_like argument p must be some permutation of 0, 1, ..., len(p)-1.
-            """
-            p = np.asanyarray(p)  # in case p is a tuple, etc.
-            s = np.empty_like(p)
-            s[p] = np.arange(p.size)
-            return s
-
-        # Get Inverse Random Permutation
-        inverse_rand_perm = invert_permutation(self.rand_perm)
-
-        # Revert by Applying Inverse Permutation
-        self.ffn_filepaths = [self.ffn_filepaths[jj] for jj in inverse_rand_perm]
-        if hasattr(self, "ffn_mmaps"):
-            self.ffn_mmaps = [self.ffn_mmaps[jj] for jj in inverse_rand_perm]
-        self.overlaps, self.labels = self.overlaps[inverse_rand_perm], self.labels[inverse_rand_perm]
-        self.gt_bboxes, self.trk_bboxes = self.gt_bboxes[inverse_rand_perm], self.trk_bboxes[inverse_rand_perm]
-
     def shuffle(self, random_seed=None):
-        # Revert Shuffling
-        self._revert_shuffling()
-
-        # Set Random Seed if not None
         if random_seed is not None:
             assert isinstance(random_seed, int) and random_seed > 0
             if random_seed == self.random_seed:
@@ -252,14 +204,26 @@ class BENCHMARK_DATA_OBJ(object):
             self.random_seed = random_seed
             np.random.seed(self.random_seed)
 
+        ffn_filepaths, overlaps, labels = [], [], []
+        gt_bboxes, trk_bboxes = [], []
+        for video_data_obj in self.video_data_objs:
+            ffn_filepaths = [*ffn_filepaths, *video_data_obj.ffn_filepaths[1:]]
+            overlaps.append(video_data_obj.overlaps[1:])
+            labels.append(video_data_obj.labels[1:])
+            gt_bboxes.append(video_data_obj.gt_bboxes[1:])
+            trk_bboxes.append(video_data_obj.trk_bboxes[1:])
+        self.ffn_filepaths = ffn_filepaths
+        self.overlaps = np.concatenate(overlaps)
+        self.labels = np.concatenate(labels, axis=0)
+        self.gt_bboxes = np.concatenate(gt_bboxes, axis=0)
+        self.trk_bboxes = np.concatenate(trk_bboxes, axis=0)
+        assert self.overlaps.shape[0] == self.labels.shape[0] == len(self.ffn_filepaths)
+
         # Random Permutation for Shuffling
         rand_perm = np.random.permutation(len(self))
-        self.rand_perm = rand_perm
 
         # Permute Important Variables w.r.t. "rand_perm"
         self.ffn_filepaths = [self.ffn_filepaths[j] for j in rand_perm]
-        if hasattr(self, "ffn_mmaps"):
-            self.ffn_mmaps = [self.ffn_mmaps[j] for j in rand_perm]
         self.overlaps, self.labels = self.overlaps[rand_perm], self.labels[rand_perm]
         self.gt_bboxes, self.trk_bboxes = self.gt_bboxes[rand_perm], self.trk_bboxes[rand_perm]
 
@@ -287,8 +251,6 @@ class VIDEO_DATA_OBJ(object):
         labeling_type = kwargs.get("labeling_type")
         assert labeling_type in ["one_hot", "scalar"]
         self.labeling_type = labeling_type
-        device = kwargs.get("device", __CUDA_DEVICE__)
-        self.device = device
 
         # Initialize "self.labels"
         self.labels = None
@@ -307,24 +269,9 @@ class VIDEO_DATA_OBJ(object):
                 assert os.path.isdir(video_ffn_dir)
                 frame_ffn_filenames = sorted(os.listdir(video_ffn_dir))
                 self.ffn_filepaths = [os.path.join(video_ffn_dir, _fn) for _fn in frame_ffn_filenames]
-                # self.ffn_mmaps = [np.load(fp, mmap_mode="c") for fp in self.ffn_filepaths]
+                self.ffn_filepaths.insert(0, None)
 
-        # # Smart Load "ffn_feats" -> Open First FFN Feature as an example, find its shape.
-        # #                           initialize Tensor (float32) of the found shape.
-        # #                           Directly initialize on GPU
-        # init_sample_ffn_feat = np.load(self.ffn_filepaths[0])
-        # N, S, C = len(self.ffn_filepaths), init_sample_ffn_feat.shape[0], init_sample_ffn_feat.shape[1]
-        # with torch.cuda.device(device):
-        #     self.ffn_feats = torch.cuda.FloatTensor(N+1, S, C).fill_(0) # noqa
-        #     self.ffn_feats[0] = float("nan")
-        # for f_idx in range(N):
-        #     self.ffn_feats[f_idx+1] = torch.from_numpy(np.load(self.ffn_filepaths[f_idx])).cuda(device)
-
-        # Insert "None" to "self.ffn_filepaths"
-        self.ffn_filepaths.insert(0, None)
-        # self.ffn_mmaps.insert(0, None)
-
-        # Load Bounding Boxes
+        # Open "self.ffn_outputs"
         self.gt_bboxes, self.trk_bboxes = \
             np.load(self.gt_bboxes_path), np.load(self.trk_bboxes_path)
 

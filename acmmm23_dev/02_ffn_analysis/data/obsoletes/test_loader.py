@@ -9,12 +9,8 @@ import torch.nn as nn
 import numpy as np
 from torch.utils.data import Dataset
 
-try:
-    from .utils import set_logger, load_npy_cvt_torch
-    from .trk_data_obj import BENCHMARK_DATA_OBJ
-except ImportError:
-    from utils import set_logger, load_npy_cvt_torch
-    from trk_data_obj import BENCHMARK_DATA_OBJ
+from .utils import set_logger, load_npy_cvt_torch
+from .trk_data_obj import BENCHMARK_DATA_OBJ
 
 
 # Set Important Paths
@@ -32,71 +28,34 @@ __MEMORY_CUTOFF_PERCENT__ = 95
 
 
 class TEST_DATASET(Dataset):
-    # def __init__(self, data_obj, logger, **kwargs):
-    def __init__(self, logger, init_mode, **kwargs):
+    def __init__(self, data_obj, logger, **kwargs):
+        assert isinstance(data_obj, BENCHMARK_DATA_OBJ)
 
         # Set Basic Variables
         self.logger = logger
 
-        # Assertion of Init Mode
-        assert init_mode in ["data_obj", "data_list"]
+        # Unpack KWARGS
+        device = kwargs.get("device", data_obj.device)
+        self.device = device
+        overlap_criterion = kwargs.get("overlap_criterion", data_obj.overlap_criterion)
+        assert overlap_criterion in ["iou", "diou"]
+        self.overlap_criterion = overlap_criterion
+        overlap_thresholds = kwargs.get("overlap_thresholds", data_obj.overlap_thresholds)
+        assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
+        if isinstance(overlap_thresholds, tuple):
+            overlap_thresholds = list(overlap_thresholds)
+        elif isinstance(overlap_thresholds, np.ndarray):
+            overlap_thresholds = overlap_thresholds.tolist()
+        self.overlap_thresholds = sorted(overlap_thresholds)
+        labeling_type = kwargs.get("labeling_type", data_obj.labeling_type)
+        assert labeling_type in ["one_hot", "scalar"]
+        self.labeling_type = labeling_type
 
-        if init_mode == "data_obj":
-            # Get Data Object
-            data_obj = kwargs.get("data_obj")
-            assert isinstance(data_obj, BENCHMARK_DATA_OBJ)
+        # Get Dataset Name
+        self.dataset_name = data_obj.benchmark
 
-            # Unpack KWARGS
-            device = kwargs.get("device", data_obj.device)
-            self.device = device
-            overlap_criterion = kwargs.get("overlap_criterion", data_obj.overlap_criterion)
-            assert overlap_criterion in ["iou", "diou"]
-            self.overlap_criterion = overlap_criterion
-            overlap_thresholds = kwargs.get("overlap_thresholds", data_obj.overlap_thresholds)
-            assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
-            if isinstance(overlap_thresholds, tuple):
-                overlap_thresholds = list(overlap_thresholds)
-            elif isinstance(overlap_thresholds, np.ndarray):
-                overlap_thresholds = overlap_thresholds.tolist()
-            self.overlap_thresholds = sorted(overlap_thresholds)
-            labeling_type = kwargs.get("labeling_type", data_obj.labeling_type)
-            assert labeling_type in ["one_hot", "scalar"]
-            self.labeling_type = labeling_type
-
-            # Get Dataset Name
-            self.dataset_name = data_obj.benchmark
-
-            # Get Data for "data_obj"
-            self.data = data_obj[:]
-
-        else:
-            # Unpack KWARGS
-            device = kwargs.get("device")
-            assert device is not None
-            self.device = device
-            overlap_criterion = kwargs.get("overlap_criterion")
-            assert overlap_criterion in ["iou", "diou"]
-            self.overlap_criterion = overlap_criterion
-            overlap_thresholds = kwargs.get("overlap_thresholds")
-            assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
-            if isinstance(overlap_thresholds, tuple):
-                overlap_thresholds = list(overlap_thresholds)
-            elif isinstance(overlap_thresholds, np.ndarray):
-                overlap_thresholds = overlap_thresholds.tolist()
-            self.overlap_thresholds = sorted(overlap_thresholds)
-            labeling_type = kwargs.get("labeling_type")
-            assert labeling_type in ["one_hot", "scalar"]
-            self.labeling_type = labeling_type
-
-            # Dataset Name
-            dataset_name = kwargs.get("dataset_name")
-            assert dataset_name is not None
-            self.dataset_name = dataset_name
-
-            # Data
-            data = kwargs.get("data")
-            assert isinstance(data, list) and len(data) > 0
-            self.data = data
+        # Get Data for "data_obj"
+        self.data = data_obj[:]
 
         # Set Iteration Counter
         self.__iter_counter = 0
@@ -112,8 +71,8 @@ class TEST_DATASET(Dataset):
         curr_data_dict = self.data[item]
 
         # Load "ffn_outputs"
-        # ffn_outputs = load_npy_cvt_torch(curr_data_dict["ffn_filepath"], device=self.device)
-        ffn_outputs = torch.from_numpy(curr_data_dict["ffn_mmap"]).to(device=self.device)
+        ffn_outputs = load_npy_cvt_torch(curr_data_dict["ffn_filepath"])
+        ffn_outputs = ffn_outputs.to(device=self.device, dtype=torch.float32)
         ffn_outputs = ffn_outputs.permute(1, 0)
 
         # Wrap "bboxes" to Tensor
@@ -125,8 +84,8 @@ class TEST_DATASET(Dataset):
         )
 
         # Wrap "overlap" to Tensor
-        overlap = torch.from_numpy(np.array(curr_data_dict["overlap"], dtype=np.float32)).to(
-            device=self.device
+        overlap = torch.Tensor([curr_data_dict["overlap"]]).to(
+            device=self.device, dtype=torch.float32
         )
 
         # Wrap "label" to Tensor
@@ -162,12 +121,8 @@ class TEST_DATASET(Dataset):
     def _clone(self, new_data):
         assert new_data is not None and isinstance(new_data, list)
         assert len(new_data) > 0
-        new_obj = TEST_DATASET(
-            logger=self.logger, init_mode="data_list",
-            device=self.device, data=new_data, dataset_name=self.dataset_name,
-            overlap_criterion=self.overlap_criterion, overlap_thresholds=self.overlap_thresholds,
-            labeling_type=self.labeling_type,
-        )
+        new_obj = deepcopy(self)
+        new_obj.data = new_data
         return new_obj
 
     def compute_label_sums(self, cvt_to_ratio=False):
@@ -277,12 +232,10 @@ if __name__ == "__main__":
 
     # Wrap with Loader
     test_dataset = TEST_DATASET(
-        data_obj=FFN_OBJ, logger=_logger, init_mode="data_obj"
+        data_obj=FFN_OBJ, logger=_logger,
     )
 
-    aa, bb = test_dataset.split_obj(ratio=0.8)
-
-    aaa = test_dataset[33]
+    aa = test_dataset[33]
 
 
     pass

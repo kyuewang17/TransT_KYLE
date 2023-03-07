@@ -35,6 +35,11 @@ def set_logger(logging_level=logging.INFO, log_name="root", logging_filepath=Non
     return logger
 
 
-def load_npy_cvt_torch(npy_filepath):
-    assert os.path.isfile(npy_filepath) and npy_filepath.endswith("npy")
-    return torch.from_numpy(np.load(npy_filepath))
+def load_npy_cvt_torch(npy_filepath, device=None):
+    assert npy_filepath.endswith("npy")
+    npy_data = np.load(npy_filepath)
+    if device is None:
+        return torch.from_numpy(npy_data)
+    else:
+        with torch.cuda.device(device):
+            return torch.cuda.FloatTensor(npy_data)
