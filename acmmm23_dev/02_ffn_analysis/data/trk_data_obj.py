@@ -11,6 +11,13 @@ from PIL import Image
 
 import torch
 import torch.nn as nn
+import torch.multiprocessing as t_mp
+from torch.multiprocessing import set_start_method
+
+try:
+    set_start_method("spawn")
+except RuntimeError:
+    pass
 
 try:
     from .utils import set_logger
@@ -78,6 +85,19 @@ class BENCHMARK_DATA_OBJ(object):
 
         device = kwargs.get("device", __CUDA_DEVICE__)
         self.device = device
+
+        # load_with_mp = kwargs.get("load_with_mp", False)
+        # assert isinstance(load_with_mp, bool)
+        # self.load_with_mp = load_with_mp
+        # num_cpu_workers = kwargs.get("num_cpu_workers")
+        # total_cpu_workers = t_mp.cpu_count()
+        # if num_cpu_workers is None:
+        #     self.num_cpu_workers = int(total_cpu_workers * 0.75)
+        # else:
+        #     assert isinstance(num_cpu_workers, int) and 0 < num_cpu_workers < total_cpu_workers
+        #     self.num_cpu_workers = num_cpu_workers
+        # if self.num_cpu_workers == 1:
+        #     self.load_with_mp = False
 
         # Get Selected Video Names and Paths
         video_names = [video_name for v_idx, video_name in enumerate(video_names) if v_idx in video_indices]
@@ -151,24 +171,9 @@ class BENCHMARK_DATA_OBJ(object):
         self.overlaps, self.labels = self.overlaps[rand_perm], self.labels[rand_perm]
         self.gt_bboxes, self.trk_bboxes = self.gt_bboxes[rand_perm], self.trk_bboxes[rand_perm]
 
-        # Load Numpy Arrays via Load Mode of "mmap"
-        self.ffn_mmaps = []
-        mmap_load_tqdm_iter = tqdm(
-            self.ffn_filepaths, desc="Loading Fusion Vectors via MMAP Mode...!", leave=True
-        )
-        for ffn_filepath in mmap_load_tqdm_iter:
-            # Load via MMAP Mode
-            self.ffn_mmaps.append(np.load(ffn_filepath, mmap_mode="c"))
-
-            # Compute Memory Percent
-            curr_memory_percent = psutil.virtual_memory().percent
-            if curr_memory_percent > __MEMORY_CUTOFF_PERCENT__:
-                raise OverflowError("Memory Critical...!")
-
-            # Set tqdm postfix
-            mmap_load_tqdm_iter.set_postfix({
-                "RAM Memory": "{:.2f}%".format(curr_memory_percent),
-            })
+        # Load Numpy Arrays via loading mode of "mmap", initialize list of mmap arrays
+        self.ffn_mmaps = [None] * len(self.ffn_filepaths)
+        self.__load_ffn()
 
         # Iteration Counter
         self.__iter_counter = 0
@@ -219,6 +224,32 @@ class BENCHMARK_DATA_OBJ(object):
             raise StopIteration
         self.__iter_counter += 1
         return ret_val
+
+    def __load_ffn(self):
+        # Define tqdm iteration object
+        mmap_load_tqdm_iter = tqdm(
+            self.ffn_filepaths, desc="Loading Fusion Vectors via MMAP Mode...!", leave=True
+        )
+
+        # Open First npy file for probing information
+        for jj, ffn_filepath in enumerate(mmap_load_tqdm_iter):
+            # Load via MMAP Mode
+            ffn_mmap = np.load(ffn_filepath, mmap_mode="c")
+            self.ffn_mmaps[jj] = ffn_mmap
+
+            # Compute Memory Percent
+            curr_memory_percent = psutil.virtual_memory().percent
+            if curr_memory_percent > __MEMORY_CUTOFF_PERCENT__:
+                raise OverflowError("Memory Critical...!")
+
+            # Set tqdm postfix
+            if jj % 100 == 0:
+                mmap_load_tqdm_iter.set_postfix({
+                    "RAM Memory": "{:.2f}%".format(curr_memory_percent),
+                })
+
+        # Close tqdm iteration object
+        mmap_load_tqdm_iter.close()
 
     def _revert_shuffling(self):
         def invert_permutation(p):
@@ -410,6 +441,8 @@ if __name__ == "__main__":
 
         overlap_criterion="iou", overlap_thresholds=[0.5],
         labeling_type="one_hot",
+
+        # load_with_mp=True, num_cpu_workers=1,
     )
 
     pass

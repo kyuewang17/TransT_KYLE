@@ -113,7 +113,8 @@ class TEST_DATASET(Dataset):
 
         # Load "ffn_outputs"
         # ffn_outputs = load_npy_cvt_torch(curr_data_dict["ffn_filepath"], device=self.device)
-        ffn_outputs = torch.from_numpy(curr_data_dict["ffn_mmap"]).to(device=self.device)
+        ffn_arr = np.array(curr_data_dict["ffn_mmap"])
+        ffn_outputs = torch.from_numpy(ffn_arr).to(device=self.device)
         ffn_outputs = ffn_outputs.permute(1, 0)
 
         # Wrap "bboxes" to Tensor
