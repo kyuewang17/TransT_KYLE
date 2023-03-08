@@ -115,8 +115,10 @@ def run_mlp_model(trk_dataset, logger, **kwargs):
         if scheduler_type == "CosineAnnealingLr":
             cos_min_lr = kwargs.get("cos_min_lr", 0)
             assert isinstance(cos_min_lr, float) and cos_min_lr < base_lr
+            T_max = kwargs.get("T_max", num_epochs)
+            assert isinstance(T_max, int) and T_max <= num_epochs
             scheduler = lr_scheduler.CosineAnnealingLR(
-                optimizer=optim, T_max=num_epochs, eta_min=cos_min_lr
+                optimizer=optim, T_max=T_max, eta_min=cos_min_lr
             )
         else:
             raise NotImplementedError()
@@ -216,7 +218,7 @@ if __name__ == "__main__":
         loss_type="WCE", optim_type="SGD", weight_decay=0,
         base_lr=0.25, momentum=0.9,
 
-        scheduler_type="CosineAnnealingLr", cos_min_lr=0.05,
+        scheduler_type="CosineAnnealingLr", cos_min_lr=0.05, T_max=25,
 
         device=__CUDA_DEVICE__,
     )
