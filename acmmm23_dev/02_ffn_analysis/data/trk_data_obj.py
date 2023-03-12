@@ -158,6 +158,16 @@ class BENCHMARK_DATA_OBJ(object):
         self.trk_bboxes = np.concatenate(self.trk_bboxes, axis=0)
         assert self.overlaps.shape[0] == self.labels.shape[0] == len(self.ffn_filepaths)
 
+        # Debug Mode
+        is_debug_mode = kwargs.get("is_debug_mode", False)
+        assert isinstance(is_debug_mode, bool)
+        if is_debug_mode:
+            debug_samples = kwargs.get("debug_samples", int(len(self.ffn_filepaths) * 0.01))
+            assert isinstance(debug_samples, int) and 0 < debug_samples <= len(self.ffn_filepaths)
+            self.ffn_filepaths = self.ffn_filepaths[:debug_samples]
+            self.overlaps, self.labels = self.overlaps[:debug_samples], self.labels[:debug_samples]
+            self.gt_bboxes, self.trk_bboxes = self.gt_bboxes[:debug_samples], self.trk_bboxes[:debug_samples]
+
         # Set Random Seed if not None
         if self.random_seed is not None:
             np.random.seed(self.random_seed)

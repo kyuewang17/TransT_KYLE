@@ -57,6 +57,10 @@ class BASE_MODEL(nn.Module):
         if len(self.layers_dict) == 0:
             return
 
+        # Return if distribution is None
+        if dist is None:
+            return
+
         # Assertion
         assert dist in ["normal", "uniform"]
 
@@ -105,10 +109,10 @@ class BASE_MODEL(nn.Module):
         raise NotImplementedError()
 
 
-# Overlap Classifier Model Class
-class OVERLAP_CLASSIFIER(BASE_MODEL):
+# "NN_statistics" Model Class
+class NN_statistics(BASE_MODEL):
     def __init__(self, **kwargs):
-        super(OVERLAP_CLASSIFIER, self).__init__(**kwargs)
+        super(NN_statistics, self).__init__(**kwargs)
 
         # === Unpack KWARGS === #
         # Get Classification Loss
@@ -267,6 +271,24 @@ class OVERLAP_CLASSIFIER(BASE_MODEL):
         return f
 
 
+# "NN_statistics" Model Class
+class NN_dense_encoding(NN_statistics):
+    def __init__(self, **kwargs):
+        super(NN_dense_encoding, self).__init__(**kwargs)
+
+    def forward(self, f):
+        # Flatten
+        f = f.view(f.shape[0], -1)
+
+        # Forward
+        for idx, layer_names in self.layers_dict.items():
+            for layer_name in layer_names:
+                layer = getattr(self, layer_name)
+                f = layer(f)
+
+        return f
+
+
 if __name__ == "__main__":
     # Set Batch Size, Spatial Dimension, and Channel Dimension for Debugging
     B, S1, S2, C = 64, 32, 32, 256
@@ -280,7 +302,19 @@ if __name__ == "__main__":
     )
 
     # Init Classifier Model
-    classifier = OVERLAP_CLASSIFIER(
+    # classifier = NN_statistics(
+    #     cls_loss="CE",
+    #
+    #     # dimensions=[256, 32, 10, 2],
+    #     dimensions=[768, 100, 32, 2],
+    #     layers=["fc", "fc", "fc"],
+    #     hidden_activations=["ReLU", "ReLU"],
+    #     batchnorm_layers=[True, True],
+    #     dropout_probs=[0.2, 0.2],
+    #     final_activation="softmax",
+    #     init_dist="normal"
+    # )
+    classifier = NN_dense_encoding(
         cls_loss="CE",
 
         # dimensions=[256, 32, 10, 2],
@@ -290,13 +324,12 @@ if __name__ == "__main__":
         batchnorm_layers=[True, True],
         dropout_probs=[0.2, 0.2],
         final_activation="softmax",
-
         init_dist="normal"
     )
     classifier.to(device=__CUDA_DEVICE__)
 
-    # Print Test
-    torchsummary.summary(classifier, input_size=(C, S1, S2))
+    # # Print Test
+    # torchsummary.summary(classifier, input_size=(C, S1, S2))
 
     # Test Forward
     out = classifier(rand_samples)

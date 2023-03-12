@@ -2,16 +2,18 @@ from __future__ import absolute_import, print_function
 
 import os
 import wandb
+import socket
 import time
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 
+from config import cfg
 from miscs import set_logger, fix_seed
 from data.trk_data_obj import BENCHMARK_DATA_OBJ
 from data.test_loader import TEST_DATASET
-from model.bones import OVERLAP_CLASSIFIER
+from model import load_model
 from loss.zoo import CLS_LOSS
 from optim.zoo import init_optim
 from main_utils import train, validate, test
@@ -31,58 +33,78 @@ __CUDA_DEVICE__ = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # Memory Cut-off Percentage
 __MEMORY_CUTOFF_PERCENT__ = 95
 
+# Debugging Mode
+__IS_DEBUG_MODE__ = False
 
-def run_mlp_model(trk_dataset, logger, **kwargs):
+
+def cfg_loader(logger, cfg_filepath, **kwargs):
+    assert os.path.isfile(cfg_filepath)
+    logger.info("Loading Configurations from: {}".format(cfg_filepath))
+    cfg.merge_from_file(cfg_filename=cfg_filepath)
+    time.sleep(1)
+    logger.info("\n=== Configuration File Logging ===\n{}\n==================================".format(cfg))
+    time.sleep(1)
+    return cfg
+
+
+def run_mlp_model(trk_dataset, logger, cfg, device, **kwargs):
     assert isinstance(trk_dataset, TEST_DATASET)
 
-    # Unpack KWARGS
-    batch_size = kwargs.get("batch_size", 128)
-    assert isinstance(batch_size, int) and batch_size > 0
-    loss_type, optim_type = kwargs.get("loss_type"), kwargs.get("optim_type")
-    weight_decay = kwargs.get("weight_decay", 0)
-    base_lr, momentum = kwargs.get("base_lr"), kwargs.get("momentum")
-    random_seed = kwargs.get("random_seed")
+    # Unpack Configurations
+    random_seed = cfg.TRAIN.random_seed
     assert isinstance(random_seed, int) and random_seed > 0
-    scheduler_type = kwargs.get("scheduler_type")
-    num_epochs = kwargs.get("num_epochs")
-    if num_epochs is None:
-        raise AssertionError()
+    batch_size = cfg.TRAIN.batch_size
+    assert isinstance(batch_size, int) and batch_size > 0
+    num_epochs = cfg.TRAIN.num_epochs
+    assert isinstance(num_epochs, int) and num_epochs > 0
+    base_lr, weight_decay = cfg.TRAIN.base_lr, cfg.TRAIN.weight_decay
+    loss_type, optim_type = cfg.TRAIN.LOSS.type, cfg.TRAIN.OPTIM.type
+    if hasattr(cfg.OPTIM[optim_type], "momentum"):
+        momentum = cfg.OPTIM[optim_type].momentum
     else:
-        assert isinstance(num_epochs, int) and num_epochs > 0
-    val_epoch_interval = kwargs.get("val_epoch_interval")
+        momentum = None
+    if cfg.TRAIN.SCHEDULER.switch:
+        scheduler_type = cfg.TRAIN.SCHEDULER.type
+    else:
+        scheduler_type = None
+    is_validation = cfg.TRAIN.VALIDATION.switch
+    assert isinstance(is_validation, bool)
+    val_epoch_interval = cfg.TRAIN.VALIDATION.epoch_interval
     assert isinstance(val_epoch_interval, int) and 0 < val_epoch_interval < num_epochs
-    device = kwargs.get("device", __CUDA_DEVICE__)
+    if device is None:
+        device = __CUDA_DEVICE__
 
     # Fix Seed
     fix_seed(random_seed=random_seed, logger=logger)
 
     # Split Trk Dataset
-    train_dataset, _dataset = trk_dataset.split_obj(ratio=0.8, split_seed=random_seed)
-    val_dataset, test_dataset = _dataset.split_obj(ratio=0.5, split_seed=random_seed)
+    if is_validation:
+        train_ratio, val_ratio, test_ratio = \
+            cfg.DATA.SPLIT_RATIO.train, cfg.DATA.SPLIT_RATIO.validation, cfg.DATA.SPLIT_RATIO.test
+        val_test_ratio = val_ratio / (val_ratio + test_ratio)
+        train_dataset, _dataset = trk_dataset.split_obj(ratio=train_ratio, split_seed=random_seed)
+        val_dataset, test_dataset = _dataset.split_obj(ratio=val_test_ratio, split_seed=random_seed)
+    else:
+        train_ratio = cfg.DATA.SPLIT_RATIO.train
+        train_dataset, test_dataset = trk_dataset.split_obj(ratio=train_ratio, split_seed=random_seed)
+        val_dataset = None
 
     # Wrap Dataset with PyTorch DataLoader
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     logger.info("\nTraining DataLoader Loaded Completely...! - # of Samples: [{:,}]".format(len(train_dataset)))
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
-    logger.info("Validation DataLoader Loaded Completely...! - # of Samples: [{:,}]".format(len(val_dataset)))
+    if is_validation:
+        val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+        logger.info("Validation DataLoader Loaded Completely...! - # of Samples: [{:,}]".format(len(val_dataset)))
+    else:
+        val_dataloader = None
+        logger.info("Validation DataLoader Skipped...!")
+        time.sleep(0.5)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     logger.info("Testing DataLoader Loaded Completely...! - # of Samples: [{:,}]".format(len(test_dataset)))
     time.sleep(0.5)
 
-    # Define Model
-    model = OVERLAP_CLASSIFIER(
-        cls_loss=loss_type, overlap_criterion=train_dataset.overlap_criterion,
-
-        # dimensions=[256, 32, 10, 2],
-        dimensions=[768, 100, 32, 2],
-        layers=["fc", "fc", "fc"],
-        hidden_activations=["ReLU", "ReLU"],
-        batchnorm_layers=[True, True],
-        dropout_probs=[0.2, 0.2],
-        final_activation="softmax",
-
-        init_dist="normal"
-    )
+    # Load Model
+    model = load_model(cfg=cfg)
     model.to(device=device)
     logger.info("Model Loaded...!")
     time.sleep(0.5)
@@ -101,9 +123,7 @@ def run_mlp_model(trk_dataset, logger, **kwargs):
     # Define Optimizer
     optim = init_optim(
         optim_type=optim_type, model_params=model.parameters(),
-
-        base_lr=base_lr,
-        weight_decay=weight_decay, momentum=momentum,
+        base_lr=base_lr, weight_decay=weight_decay, momentum=momentum,
     )
     logger.info("Optimizer Loaded...!")
     time.sleep(0.5)
@@ -114,9 +134,9 @@ def run_mlp_model(trk_dataset, logger, **kwargs):
         logger.info("Scheduler not Defined...!")
     else:
         if scheduler_type == "CosineAnnealingLr":
-            cos_min_lr = kwargs.get("cos_min_lr", 0)
+            cos_min_lr = cfg.SCHEDULER[scheduler_type].eta_min
             assert isinstance(cos_min_lr, float) and cos_min_lr < base_lr
-            T_max = kwargs.get("T_max", num_epochs)
+            T_max = cfg.SCHEDULER[scheduler_type].T_max
             assert isinstance(T_max, int) and T_max <= num_epochs
             scheduler = lr_scheduler.CosineAnnealingLR(
                 optimizer=optim, T_max=T_max, eta_min=cos_min_lr
@@ -145,23 +165,24 @@ def run_mlp_model(trk_dataset, logger, **kwargs):
         pass
 
         # Validate Model & Compute CLS Evaluations for Validation Set
-        if epoch == 0 or (epoch + 1) % val_epoch_interval == 0:
-            # Validate Model
-            val_loss, val_cls_metric_obj = validate(
-                val_dataloader=val_dataloader, model=model,
-                criterion=criterion, epoch=epoch
-            )
+        if is_validation:
+            if epoch == 0 or (epoch + 1) % val_epoch_interval == 0:
+                # Validate Model
+                val_loss, val_cls_metric_obj = validate(
+                    val_dataloader=val_dataloader, model=model,
+                    criterion=criterion, epoch=epoch
+                )
 
-            # Compute Current Epoch's Classification Evaluations
-            val_recalls = 100 * val_cls_metric_obj.compute_recalls()
-            val_precisions = 100 * val_cls_metric_obj.compute_precisions()
-            val_f1scores = 100 * val_cls_metric_obj.compute_f1scores()
-            val_accuracy = 100 * val_cls_metric_obj.compute_accuracy()
-            val_bal_accuracy = 100 * val_cls_metric_obj.compute_balanced_accuracy()
-            val_TPR = 100 * val_cls_metric_obj.TPR()
-            val_FNR = 100 * val_cls_metric_obj.FNR()
-            val_FPR = 100 * val_cls_metric_obj.FPR()
-            val_TNR = 100 * val_cls_metric_obj.TNR()
+                # Compute Current Epoch's Classification Evaluations
+                val_recalls = 100 * val_cls_metric_obj.compute_recalls()
+                val_precisions = 100 * val_cls_metric_obj.compute_precisions()
+                val_f1scores = 100 * val_cls_metric_obj.compute_f1scores()
+                val_accuracy = 100 * val_cls_metric_obj.compute_accuracy()
+                val_bal_accuracy = 100 * val_cls_metric_obj.compute_balanced_accuracy()
+                val_TPR = 100 * val_cls_metric_obj.TPR()
+                val_FNR = 100 * val_cls_metric_obj.FNR()
+                val_FPR = 100 * val_cls_metric_obj.FPR()
+                val_TNR = 100 * val_cls_metric_obj.TNR()
 
         # Scheduler
         if scheduler is not None:
@@ -187,20 +208,24 @@ def run_mlp_model(trk_dataset, logger, **kwargs):
 
 
 if __name__ == "__main__":
-    # Set FFN Data Path
-    ffn_data_path = os.path.join(__FFN_DATA_ROOT_PATH__, __BENCHMARK_DATASET__)
-
     # Logger
     _logger = set_logger()
 
+    # Load Configurations via YAML file
+    cfg = cfg_loader(
+        logger=_logger, cfg_filepath=os.path.join(os.path.dirname(__file__), "cfgs", "base.yaml")
+    )
+
     # Load Benchmark Data Object
     trk_data_obj = BENCHMARK_DATA_OBJ(
-        root_path=ffn_data_path, benchmark=__BENCHMARK_DATASET__, logger=_logger,
-
-        overlap_criterion="iou", overlap_thresholds=[0.5],
-        labeling_type="one_hot",
-
-        random_seed=1234,
+        logger=_logger,
+        root_path=os.path.join(cfg.DATA.root_path, cfg.DATA.benchmark),
+        benchmark=cfg.DATA.benchmark,
+        overlap_criterion=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_criterion,
+        overlap_thresholds=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
+        labeling_type=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
+        random_seed=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
+        is_debug_mode=__IS_DEBUG_MODE__,
     )
 
     # Wrap with Test Loader
@@ -208,21 +233,7 @@ if __name__ == "__main__":
 
     # Run MLP Model Code
     run_mlp_model(
-        trk_dataset=trk_dataset,
-        logger=_logger,
-
-        random_seed=1111,
-
-        batch_size=512, num_epochs=50,
-        val_epoch_interval=5,
-
-        loss_type="WCE", optim_type="SGD", weight_decay=0,
-        base_lr=0.25, momentum=0.9,
-
-        scheduler_type="CosineAnnealingLr", cos_min_lr=0.05, T_max=25,
-
-        device=__CUDA_DEVICE__,
+        trk_dataset=trk_dataset, logger=_logger, cfg=cfg, device=__CUDA_DEVICE__,
     )
-
 
     pass

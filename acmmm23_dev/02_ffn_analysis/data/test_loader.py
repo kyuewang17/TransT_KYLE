@@ -273,7 +273,7 @@ if __name__ == "__main__":
         overlap_criterion="iou", overlap_thresholds=[0.5],
         labeling_type="one_hot",
 
-        random_seed=1234,
+        random_seed=1234, is_debug_mode=True,
     )
 
     # Wrap with Loader
@@ -281,7 +281,7 @@ if __name__ == "__main__":
         data_obj=FFN_OBJ, logger=_logger, init_mode="data_obj"
     )
 
-    aa, bb = test_dataset.split_obj(ratio=0.8)
+    # aa, bb = test_dataset.split_obj(ratio=0.8)
 
     aaa = test_dataset[33]
 

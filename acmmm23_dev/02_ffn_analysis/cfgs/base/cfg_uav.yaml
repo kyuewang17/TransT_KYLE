@@ -1,0 +1,82 @@
+MAIN_PARAMS:
+  benchmark: &BENCHMARK "UAV123"
+  overlap_criterion: &OVERLAP_CRITERION "iou"
+  overlap_thresholds: &OVERLAP_THRESHOLDS [0.5]
+  labeling_type: &LABELING_TYPE "one_hot"
+  train_seed: &TRAIN_SEED 1111
+  num_epochs: &NUM_EPOCHS 100
+  batch_size: &BATCH_SIZE 512
+  base_lr: &BASE_LR 0.25
+  min_lr: &MIN_LR 0.01
+  loss_type: &LOSS_TYPE "WCE"
+#  model_type: &MODEL_TYPE "NN_statistics"
+  model_type: &MODEL_TYPE "NN_dense_encoding"
+
+DATA:
+  root_path: "/home/kyle/PycharmProjects/TransT_KYLE/acmmm23_dev/ffn_data"
+  benchmark: *BENCHMARK
+  OPTS:
+    BENCHMARK_DATA_OBJ:
+      overlap_criterion: *OVERLAP_CRITERION
+      overlap_thresholds: *OVERLAP_THRESHOLDS
+      labeling_type: *LABELING_TYPE
+      random_seed: 1234
+    TEST_DATASET:
+      overlap_criterion: *OVERLAP_CRITERION
+      overlap_thresholds: *OVERLAP_THRESHOLDS
+      labeling_type: *LABELING_TYPE
+  SPLIT_RATIO:
+    train: 0.7
+    validation: 0.1
+    test: 0.2
+
+TRAIN:
+  random_seed: *TRAIN_SEED
+  num_epochs: *NUM_EPOCHS
+  batch_size: *BATCH_SIZE
+  base_lr: *BASE_LR
+  weight_decay: &WEIGHT_DECAY 0.0
+  VALIDATION:
+    switch: true
+    epoch_interval: 5
+  LOSS:
+    type: *LOSS_TYPE
+  OPTIM:
+    type: "SGD"
+  MODEL:
+    type: *MODEL_TYPE
+  SCHEDULER:
+    switch: true
+    type: "CosineAnnealingLr"
+
+OPTIM:
+  SGD:
+    momentum: 0.9
+    weight_decay: *WEIGHT_DECAY
+
+MODEL:
+  INITIALIZATION:
+    distribution: "uniform"
+  NN_statistics:
+    dimensions: [768, 100, 32, 2]
+    layers: ["fc", "fc", "fc"]
+    hidden_activations: ["ReLU", "ReLU"]
+    batchnorm_layers: [true, true]
+    dropout_probs: [0.2, 0.2]
+    final_activation: "softmax"
+  NN_dense_encoding:
+    dimensions: [262144, 2048, 256, 32, 2]
+    layers: ["fc", "fc", "fc", "fc"]
+    hidden_activations: ["LeakyReLU", "LeakyReLU", "LeakyReLU"]
+    batchnorm_layers: [ true, true, true ]
+    dropout_probs: [ 0.2, 0.2, 0.2 ]
+    final_activation: "softmax"
+
+SCHEDULER:
+  MultiStepLR:
+    step: 5
+    gamma: 0.8
+    min_lr: *MIN_LR
+  CosineAnnealingLr:
+    eta_min: *MIN_LR
+    T_max: *NUM_EPOCHS
