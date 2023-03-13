@@ -1,11 +1,15 @@
 from __future__ import absolute_import, print_function
 
 import os
+import numpy as np
 import yaml
 import wandb
 import socket
 import time
+from copy import deepcopy
 import torch
+import itertools
+from yacs.config import CfgNode
 from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 from tqdm import tqdm
@@ -23,6 +27,13 @@ from main_utils import train, validate, test
 # Set Important Paths
 __PROJECT_MASTER_PATH__ = "/home/kyle/PycharmProjects/TransT_KYLE"
 
+# Set Benchmark Dataset
+__BENCHMARK_DATASET__ = "OTB100"
+# __BENCHMARK_DATASET__ = "UAV123"
+
+# Is Multiple Configuration Loading
+__IS_MULTI_CFG_LOADING__ = False
+
 # CUDA Device Configuration
 __CUDA_DEVICE__ = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -33,7 +44,17 @@ __MEMORY_CUTOFF_PERCENT__ = 95
 __IS_DEBUG_MODE__ = False
 
 
-def cfg_loader(logger, cfg_filepath, is_multi_loader=False, ablation_cfg_filepath=None):
+def cfg_loader(logger, cfg_filepath, **kwargs):
+    # Unpack KWARGS
+    is_multi_loader = kwargs.get("is_multi_loader", False)
+    assert isinstance(is_multi_loader, bool)
+    ablation_cfg_filepath = kwargs.get("ablation_cfg_filepath")
+    if is_multi_loader:
+        assert ablation_cfg_filepath is not None
+    ablation_cfg_shuffle_seed = kwargs.get("ablation_cfg_shuffle_seed", 333)
+    assert isinstance(ablation_cfg_shuffle_seed, int) and ablation_cfg_shuffle_seed > 0
+
+    # Load Configurations
     assert os.path.isfile(cfg_filepath)
     logger.info("Loading Configurations from: {}".format(cfg_filepath))
     cfg.merge_from_file(cfg_filename=cfg_filepath)
@@ -41,7 +62,7 @@ def cfg_loader(logger, cfg_filepath, is_multi_loader=False, ablation_cfg_filepat
     logger.info("\n=== Configuration File Logging ===\n{}\n==================================".format(cfg))
     time.sleep(1)
     if is_multi_loader is False:
-        return cfg
+        return [cfg]
     else:
         assert os.path.isfile(ablation_cfg_filepath)
         assert ablation_cfg_filepath.split("/")[-1] == cfg_filepath.split("/")[-1]
@@ -49,38 +70,134 @@ def cfg_loader(logger, cfg_filepath, is_multi_loader=False, ablation_cfg_filepat
             ablation_cfg = yaml.safe_load(ablation_f)
         logger.info("\nAblation Configuration File Loaded from: {}".format(ablation_cfg_filepath))
         time.sleep(1)
-        return merge_ablation_cfg(ablation_cfg=ablation_cfg)
+        return merge_ablation_cfg(
+            ablation_cfg=ablation_cfg, shuffle_seed=ablation_cfg_shuffle_seed
+        )
 
 
-def merge_ablation_cfg(ablation_cfg):
+def merge_ablation_cfg(ablation_cfg, shuffle_seed=None):
+    # Assertion first
+    assert cfg.DATA.benchmark == ablation_cfg["BASE_VARS"]["benchmark"]
+    if shuffle_seed is not None:
+        assert isinstance(shuffle_seed, int) and shuffle_seed > 0
+        np.random.seed(shuffle_seed)
 
-    print(12345)
-    return cfg
+    # Get Multiple Configurations for ablation first
+    ablations, models = ablation_cfg["ABLATIONS"], ablation_cfg["MODELS"]
+
+    # Filter Models
+    new_models = {}
+    for model_type, model_dict in models.items():
+        if model_type in ablations["model_types"]:
+            new_models[model_type] = model_dict
+    models = new_models
+
+    # Check "models" dictionary
+    model_cfgs = {}
+    for model_type, model_dict in models.items():
+        _k, _v = zip(*model_dict.items())
+        if not all(len(_v[0]) == len(__v) for __v in _v[1:]):
+            raise AssertionError("Model params do not support permutations...!")
+        _v_T = [list(i) for i in zip(*_v)]
+        for _v_T_elem in _v_T:
+            if model_type not in model_cfgs:
+                model_cfgs[model_type] = [{k: v for k, v in zip(_k, _v_T_elem)}]
+            else:
+                model_cfgs[model_type].append({k: v for k, v in zip(_k, _v_T_elem)})
+
+    # Get Permutations for Multiple Configurations using "ablations"
+    _k, _v = zip(*ablations.items())
+    multiple_cfgs = [dict(zip(_k, v)) for v in itertools.product(*_v)]
+
+    # Traverse "multiple_cfgs" and apply "model_cfgs"
+    new_multiple_cfgs = []
+    for _cfg in multiple_cfgs:
+        model_type = _cfg["model_types"]
+        matched_model_cfgs = model_cfgs[model_type]
+        for matched_model_cfg in matched_model_cfgs:
+            _cfg_copy = deepcopy(_cfg)
+            _cfg_copy[model_type] = matched_model_cfg
+            new_multiple_cfgs.append(_cfg_copy)
+
+    # Shuffle Multiple Configurations
+    shuffle_perm = np.random.permutation(len(new_multiple_cfgs))
+    multiple_cfgs = [new_multiple_cfgs[jj] for jj in shuffle_perm]
+
+    # Merge with Configuration
+    cfgs = []
+    for _cfg in multiple_cfgs:
+        # Copy original configuration
+        new_cfg = deepcopy(cfg)
+
+        # ==== Substitute as follows ==== #
+
+        # Training Seed
+        new_cfg.MAIN_PARAMS.train_seed = _cfg["train_seeds"]
+        new_cfg.TRAIN.random_seed = _cfg["train_seeds"]
+
+        # Batch Size
+        new_cfg.MAIN_PARAMS.batch_size = _cfg["batch_sizes"]
+        new_cfg.TRAIN.batch_size = _cfg["batch_sizes"]
+
+        # Overlap Thresholds
+        new_cfg.MAIN_PARAMS.overlap_thresholds = _cfg["overlap_thresholds"]
+        new_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds = _cfg["overlap_thresholds"]
+        new_cfg.DATA.OPTS.TEST_DATASET.overlap_thresholds = _cfg["overlap_thresholds"]
+
+        # Number of Epochs
+        new_cfg.MAIN_PARAMS.num_epochs = _cfg["num_epochs"]
+        new_cfg.TRAIN.num_epochs = _cfg["num_epochs"]
+        new_cfg.SCHEDULER.CosineAnnealingLr.T_max = _cfg["num_epochs"]
+
+        # Learning Rates
+        new_cfg.MAIN_PARAMS.base_lr = _cfg["base_lrs"]
+        new_cfg.TRAIN.base_lr = _cfg["base_lrs"]
+        new_cfg.MAIN_PARAMS.min_lr = _cfg["min_lrs"]
+        new_cfg.SCHEDULER.MultiStepLR.min_lr = _cfg["min_lrs"]
+        new_cfg.SCHEDULER.CosineAnnealingLr.eta_min = _cfg["min_lrs"]
+
+        # Loss Types
+        new_cfg.MAIN_PARAMS.loss_type = _cfg["loss_types"]
+        new_cfg.TRAIN.LOSS.type = _cfg["loss_types"]
+
+        # Model Types & Models
+        model_type = _cfg["model_types"]
+        new_cfg.MAIN_PARAMS.model_type = model_type
+        new_cfg.TRAIN.MODEL.type = model_type
+        for model_param_name, model_params in _cfg[model_type].items():
+            if hasattr(new_cfg.MODEL[model_type], model_param_name) is False:
+                raise AssertionError()
+            new_cfg.MODEL[model_type][model_param_name] = model_params
+
+        # Append New Configurations
+        cfgs.append(new_cfg)
+
+    return cfgs
 
 
-def run_mlp_model(trk_dataset, logger, cfg, device, **kwargs):
+def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
     assert isinstance(trk_dataset, TEST_DATASET)
 
     # Unpack Configurations
-    random_seed = cfg.TRAIN.random_seed
+    random_seed = cfgtion.TRAIN.random_seed
     assert isinstance(random_seed, int) and random_seed > 0
-    batch_size = cfg.TRAIN.batch_size
+    batch_size = cfgtion.TRAIN.batch_size
     assert isinstance(batch_size, int) and batch_size > 0
-    num_epochs = cfg.TRAIN.num_epochs
+    num_epochs = cfgtion.TRAIN.num_epochs
     assert isinstance(num_epochs, int) and num_epochs > 0
-    base_lr, weight_decay = cfg.TRAIN.base_lr, cfg.TRAIN.weight_decay
-    loss_type, optim_type = cfg.TRAIN.LOSS.type, cfg.TRAIN.OPTIM.type
-    if hasattr(cfg.OPTIM[optim_type], "momentum"):
-        momentum = cfg.OPTIM[optim_type].momentum
+    base_lr, weight_decay = cfgtion.TRAIN.base_lr, cfgtion.TRAIN.weight_decay
+    loss_type, optim_type = cfgtion.TRAIN.LOSS.type, cfgtion.TRAIN.OPTIM.type
+    if hasattr(cfgtion.OPTIM[optim_type], "momentum"):
+        momentum = cfgtion.OPTIM[optim_type].momentum
     else:
         momentum = None
-    if cfg.TRAIN.SCHEDULER.switch:
-        scheduler_type = cfg.TRAIN.SCHEDULER.type
+    if cfgtion.TRAIN.SCHEDULER.switch:
+        scheduler_type = cfgtion.TRAIN.SCHEDULER.type
     else:
         scheduler_type = None
-    is_validation = cfg.TRAIN.VALIDATION.switch
+    is_validation = cfgtion.TRAIN.VALIDATION.switch
     assert isinstance(is_validation, bool)
-    val_epoch_interval = cfg.TRAIN.VALIDATION.epoch_interval
+    val_epoch_interval = cfgtion.TRAIN.VALIDATION.epoch_interval
     assert isinstance(val_epoch_interval, int) and 0 < val_epoch_interval < num_epochs
     if device is None:
         device = __CUDA_DEVICE__
@@ -91,12 +208,12 @@ def run_mlp_model(trk_dataset, logger, cfg, device, **kwargs):
     # Split Trk Dataset
     if is_validation:
         train_ratio, val_ratio, test_ratio = \
-            cfg.DATA.SPLIT_RATIO.train, cfg.DATA.SPLIT_RATIO.validation, cfg.DATA.SPLIT_RATIO.test
+            cfgtion.DATA.SPLIT_RATIO.train, cfgtion.DATA.SPLIT_RATIO.validation, cfgtion.DATA.SPLIT_RATIO.test
         val_test_ratio = val_ratio / (val_ratio + test_ratio)
         train_dataset, _dataset = trk_dataset.split_obj(ratio=train_ratio, split_seed=random_seed)
         val_dataset, test_dataset = _dataset.split_obj(ratio=val_test_ratio, split_seed=random_seed)
     else:
-        train_ratio = cfg.DATA.SPLIT_RATIO.train
+        train_ratio = cfgtion.DATA.SPLIT_RATIO.train
         train_dataset, test_dataset = trk_dataset.split_obj(ratio=train_ratio, split_seed=random_seed)
         val_dataset = None
 
@@ -115,7 +232,7 @@ def run_mlp_model(trk_dataset, logger, cfg, device, **kwargs):
     time.sleep(0.5)
 
     # Load Model
-    model = load_model(cfg=cfg)
+    model = load_model(cfg=cfgtion)
     model.to(device=device)
     logger.info("Model Loaded...!")
     time.sleep(0.5)
@@ -145,9 +262,9 @@ def run_mlp_model(trk_dataset, logger, cfg, device, **kwargs):
         logger.info("Scheduler not Defined...!")
     else:
         if scheduler_type == "CosineAnnealingLr":
-            cos_min_lr = cfg.SCHEDULER[scheduler_type].eta_min
+            cos_min_lr = cfgtion.SCHEDULER[scheduler_type].eta_min
             assert isinstance(cos_min_lr, float) and cos_min_lr < base_lr
-            T_max = cfg.SCHEDULER[scheduler_type].T_max
+            T_max = cfgtion.SCHEDULER[scheduler_type].T_max
             assert isinstance(T_max, int) and T_max <= num_epochs
             scheduler = lr_scheduler.CosineAnnealingLR(
                 optimizer=optim, T_max=T_max, eta_min=cos_min_lr
@@ -222,32 +339,47 @@ if __name__ == "__main__":
     # Logger
     _logger = set_logger()
 
+    # Set Configuration File Paths
+    if __BENCHMARK_DATASET__ == "OTB100":
+        cfg_filepath = os.path.join(os.path.dirname(__file__), "cfgs", "base", "cfg_otb.yaml")
+        ablation_cfg_filepath = os.path.join(
+            os.path.dirname(__file__), "cfgs", "ablations", "cfg_otb.yaml"
+        )
+    elif __BENCHMARK_DATASET__ == "UAV123":
+        cfg_filepath = os.path.join(os.path.dirname(__file__), "cfgs", "base", "cfg_uav.yaml")
+        ablation_cfg_filepath = os.path.join(
+            os.path.dirname(__file__), "cfgs", "ablations", "cfg_uav.yaml"
+        )
+    else:
+        raise NotImplementedError()
+
     # Load Configurations via YAML file
-    cfg = cfg_loader(
-        logger=_logger,
-        cfg_filepath=os.path.join(os.path.dirname(__file__), "cfgs", "base", "cfg_otb.yaml"),
-        is_multi_loader=True,
-        ablation_cfg_filepath=os.path.join(os.path.dirname(__file__), "cfgs", "ablations", "cfg_otb.yaml")
+    cfgs = cfg_loader(
+        logger=_logger, cfg_filepath=cfg_filepath,
+        is_multi_loader=__IS_MULTI_CFG_LOADING__, ablation_cfg_filepath=ablation_cfg_filepath
     )
 
-    # Load Benchmark Data Object
-    trk_data_obj = BENCHMARK_DATA_OBJ(
-        logger=_logger,
-        root_path=os.path.join(cfg.DATA.root_path, cfg.DATA.benchmark),
-        benchmark=cfg.DATA.benchmark,
-        overlap_criterion=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_criterion,
-        overlap_thresholds=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
-        labeling_type=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
-        random_seed=cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
-        is_debug_mode=__IS_DEBUG_MODE__,
-    )
+    # Iterate for Configurations
+    for _cfg_idx, _cfg in enumerate(cfgs):
 
-    # Wrap with Test Loader
-    trk_dataset = TEST_DATASET(data_obj=trk_data_obj, logger=_logger, init_mode="data_obj")
+        # Load Benchmark Data Object
+        trk_data_obj = BENCHMARK_DATA_OBJ(
+            logger=_logger,
+            root_path=os.path.join(_cfg.DATA.root_path, _cfg.DATA.benchmark),
+            benchmark=_cfg.DATA.benchmark,
+            overlap_criterion=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_criterion,
+            overlap_thresholds=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
+            labeling_type=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
+            random_seed=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
+            is_debug_mode=__IS_DEBUG_MODE__,
+        )
 
-    # Run MLP Model Code
-    run_mlp_model(
-        trk_dataset=trk_dataset, logger=_logger, cfg=cfg, device=__CUDA_DEVICE__,
-    )
+        # Wrap with Test Loader
+        trk_dataset = TEST_DATASET(data_obj=trk_data_obj, logger=_logger, init_mode="data_obj")
 
-    pass
+        # Run MLP Model Code
+        run_mlp_model(
+            trk_dataset=trk_dataset, logger=_logger, cfgtion=_cfg, device=__CUDA_DEVICE__,
+        )
+
+        pass

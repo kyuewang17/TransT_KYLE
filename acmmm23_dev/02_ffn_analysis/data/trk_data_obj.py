@@ -162,7 +162,7 @@ class BENCHMARK_DATA_OBJ(object):
         is_debug_mode = kwargs.get("is_debug_mode", False)
         assert isinstance(is_debug_mode, bool)
         if is_debug_mode:
-            debug_samples = kwargs.get("debug_samples", int(len(self.ffn_filepaths) * 0.01))
+            debug_samples = kwargs.get("debug_samples", int(len(self.ffn_filepaths) * 0.1))
             assert isinstance(debug_samples, int) and 0 < debug_samples <= len(self.ffn_filepaths)
             self.ffn_filepaths = self.ffn_filepaths[:debug_samples]
             self.overlaps, self.labels = self.overlaps[:debug_samples], self.labels[:debug_samples]

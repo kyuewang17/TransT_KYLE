@@ -1,5 +1,5 @@
 BASE_VARS:
-  benchmark: "OTB100"
+  benchmark: "UAV123"
 
 ABLATIONS:
   train_seeds: [7, 123, 1111]
