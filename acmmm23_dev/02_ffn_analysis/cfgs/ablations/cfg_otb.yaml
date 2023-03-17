@@ -23,7 +23,7 @@ ABLATIONS:
     - [0.9]
   num_epochs:
 #    - 2
-    - 100
+#    - 100
     - 200
 #    - 500
   base_lrs:
@@ -31,7 +31,7 @@ ABLATIONS:
     - 0.25
     - 0.1
   min_lrs:
-#    - 0.05
+    - 0.05
     - 0.01
     - 0.001
   loss_types:
