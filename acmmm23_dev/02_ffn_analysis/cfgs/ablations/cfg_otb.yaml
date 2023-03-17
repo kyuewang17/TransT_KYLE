@@ -62,16 +62,16 @@ MODELS:
   NN_dense_encoding:
     dimensions:
       - [ 262144, 2048, 256, 32, 2 ]
-      - [ 262144, 2048, 64, 2 ]
+#      - [ 262144, 2048, 64, 2 ]
     layers:
       - [ "fc", "fc", "fc", "fc" ]
-      - [ "fc", "fc", "fc"]
+#      - [ "fc", "fc", "fc"]
     hidden_activations:
       - [ "LeakyReLU", "LeakyReLU", "LeakyReLU" ]
-      - [ "LeakyReLU", "LeakyReLU" ]
+#      - [ "LeakyReLU", "LeakyReLU" ]
     batchnorm_layers:
       - [ true, true, true ]
-      - [ true, true ]
+#      - [ true, true ]
     dropout_probs:
       - [ 0.2, 0.2, 0.2 ]
-      - [ 0.2, 0.2 ]
+#      - [ 0.2, 0.2 ]
