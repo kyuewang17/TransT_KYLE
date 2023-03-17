@@ -36,7 +36,7 @@ __BENCHMARK_DATASET__ = "OTB100"
 # --> Assign "Hostname" for each experiment machine
 #     "hostname" can be obtained using "socket.gethostname()"
 __EXP_MACHINE_LIST__ = [
-    # "PIL-kyle",
+    "PIL-kyle",
     "carpenters1",
     "carpenters2",
 ]
@@ -48,7 +48,7 @@ __CUDA_DEVICE__ = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 __MEMORY_CUTOFF_PERCENT__ = 95
 
 # Debugging Mode
-__IS_DEBUG_MODE__ = False
+__IS_DEBUG_MODE__ = True
 
 
 def cfg_loader(logger, cfg_filepath, **kwargs):
@@ -468,8 +468,9 @@ def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
                     wandb_log_dict["Val/F1-Score(#{:02d})".format(label_idx)] = val_f1scores[label_idx]
 
         # WandB Train/Val Logging
-        wandb_log_commit = False if epoch == num_epochs - 1 else True
-        wandb.log(wandb_log_dict, step=epoch, commit=wandb_log_commit)
+        if is_debug_mode is False:
+            wandb_log_commit = False if epoch == num_epochs - 1 else True
+            wandb.log(wandb_log_dict, step=epoch, commit=wandb_log_commit)
 
         # Scheduler
         if scheduler is not None:
@@ -500,7 +501,8 @@ def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
         wandb_test_log_dict["Test/F1-Score(#{:02d})".format(label_idx)] = test_f1scores[label_idx]
 
     # WandB Test Logging
-    wandb.log(wandb_test_log_dict)
+    if is_debug_mode is False:
+        wandb.log(wandb_test_log_dict)
 
     # todo: Save Final Model
     print(12345)
@@ -533,18 +535,24 @@ if __name__ == "__main__":
 
     # Iterate for Configurations
     for _cfg_idx, _cfg in enumerate(cfgs):
-
-        # Load Benchmark Data Object
-        trk_data_obj = BENCHMARK_DATA_OBJ(
-            logger=_logger,
-            root_path=os.path.join(_cfg.DATA.root_path, _cfg.DATA.benchmark),
-            benchmark=_cfg.DATA.benchmark,
-            overlap_criterion=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_criterion,
-            overlap_thresholds=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
-            labeling_type=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
-            random_seed=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
-            is_debug_mode=__IS_DEBUG_MODE__,
-        )
+        if _cfg_idx == 0:
+            # Load Benchmark Data Object
+            trk_data_obj = BENCHMARK_DATA_OBJ(
+                logger=_logger,
+                root_path=os.path.join(_cfg.DATA.root_path, _cfg.DATA.benchmark),
+                benchmark=_cfg.DATA.benchmark,
+                overlap_criterion=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_criterion,
+                overlap_thresholds=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
+                labeling_type=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
+                random_seed=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
+                is_debug_mode=__IS_DEBUG_MODE__,
+            )
+        else:
+            trk_data_obj.reload( # noqa
+                overlap_criterion=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_criterion,
+                overlap_thresholds=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
+                labeling_type=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
+            )
 
         # Wrap with Test Loader
         trk_dataset = TEST_DATASET(data_obj=trk_data_obj, logger=_logger, init_mode="data_obj")
