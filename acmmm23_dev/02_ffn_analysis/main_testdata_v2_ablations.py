@@ -36,7 +36,7 @@ __BENCHMARK_DATASET__ = "OTB100"
 # --> Assign "Hostname" for each experiment machine
 #     "hostname" can be obtained using "socket.gethostname()"
 __EXP_MACHINE_LIST__ = [
-    "PIL-kyle",
+    # "PIL-kyle",
     "carpenters1",
     "carpenters2",
 ]
