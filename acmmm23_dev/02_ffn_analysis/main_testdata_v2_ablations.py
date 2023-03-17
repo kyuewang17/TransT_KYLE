@@ -36,7 +36,7 @@ __BENCHMARK_DATASET__ = "OTB100"
 # --> Assign "Hostname" for each experiment machine
 #     "hostname" can be obtained using "socket.gethostname()"
 __EXP_MACHINE_LIST__ = [
-    "PIL-kyle",
+    # "PIL-kyle",
     "carpenters1",
     "carpenters2",
 ]
@@ -48,7 +48,7 @@ __CUDA_DEVICE__ = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 __MEMORY_CUTOFF_PERCENT__ = 95
 
 # Debugging Mode
-__IS_DEBUG_MODE__ = True
+__IS_DEBUG_MODE__ = False
 
 
 def cfg_loader(logger, cfg_filepath, **kwargs):
