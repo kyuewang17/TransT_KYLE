@@ -39,7 +39,7 @@ __BENCHMARK_DATASET__ = "OTB100"
 #     "hostname" can be obtained using "socket.gethostname()"
 __EXP_MACHINE_LIST__ = [
     "PIL-kyle",
-    # "carpenters1",
+    "carpenters1",
     # "carpenters2",
 ]
 
@@ -297,29 +297,30 @@ def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
 
     # === Import WandB if non-debug mode === #
     if is_debug_mode is False:
-        # Declare WandB Api
-        wandb_api = wandb.Api()
+        # # Declare WandB Api
+        # wandb_api = wandb.Api()
 
-        # Get Runs, to exclude same experiments
-        try:
-            wandb_runs = wandb_api.runs(
-                wandb_entity + "/" + wandb_project, per_page=5000, filters={}
-            )
-
-            # Iterate for Runs and Gather Names
-            wandb_run_names = [wandb_run.name for wandb_run in wandb_runs]
-            wandb_exp_names = [wandb_run_name.split("__", 2)[-1] for wandb_run_name in wandb_run_names]
-            wandb_exp_names = np.array(wandb_exp_names)
-
-            # Find if Current Experiment Exist in the Project
-            wandb_indices = np.where(wandb_exp_names == exp_name.split("__", 2)[-1])[0]
-            if len(wandb_indices) > 0:
-                logger.warn("Skipping Experiment: {}".format(exp_name))
-                time.sleep(2)
-                return
-
-        except ValueError:
-            pass
+        # todo: sophisticate this code...!
+        # # Get Runs, to exclude same experiments
+        # try:
+        #     wandb_runs = wandb_api.runs(
+        #         wandb_entity + "/" + wandb_project, per_page=5000, filters={}
+        #     )
+        #
+        #     # Iterate for Runs and Gather Names
+        #     wandb_run_names = [wandb_run.name for wandb_run in wandb_runs]
+        #     wandb_exp_names = [wandb_run_name.split("__", 2)[-1] for wandb_run_name in wandb_run_names]
+        #     wandb_exp_names = np.array(wandb_exp_names)
+        #
+        #     # Find if Current Experiment Exist in the Project
+        #     wandb_indices = np.where(wandb_exp_names == exp_name.split("__", 2)[-1])[0]
+        #     if len(wandb_indices) > 0:
+        #         logger.warn("Skipping Experiment: {}".format(exp_name))
+        #         time.sleep(2)
+        #         return
+        #
+        # except ValueError:
+        #     pass
 
         # Initialize WandB
         wandb.init(project=wandb_project, entity=wandb_entity, config=wandb_cfg, reinit=True)
