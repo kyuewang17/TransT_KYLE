@@ -2,6 +2,7 @@ from __future__ import absolute_import, print_function
 
 import os
 import time
+import datetime
 import sys
 import logging
 import numpy as np
@@ -66,6 +67,10 @@ def fix_seed(random_seed, logger=None):
     torch.backends.cudnn.deterministic = True
     if logger is not None:
         logger.info("Random Seed Fixed as [{}]...!".format(random_seed))
+
+
+def get_current_datetime_str(fmt):
+    return datetime.datetime.now().strftime(fmt)
 
 
 def set_logger(logging_level=logging.INFO, log_name="root", logging_filepath=None):

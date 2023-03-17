@@ -5,7 +5,7 @@ MAIN_PARAMS:
   labeling_type: &LABELING_TYPE "one_hot"
   train_seed: &TRAIN_SEED 1111
   num_epochs: &NUM_EPOCHS 100
-  batch_size: &BATCH_SIZE 512
+  batch_size: &BATCH_SIZE 256
   base_lr: &BASE_LR 0.25
   min_lr: &MIN_LR 0.01
   loss_type: &LOSS_TYPE "WCE"
@@ -38,7 +38,7 @@ TRAIN:
   weight_decay: &WEIGHT_DECAY 0.0
   VALIDATION:
     switch: true
-    epoch_interval: 5
+    epoch_interval: 10
   LOSS:
     type: *LOSS_TYPE
   OPTIM:

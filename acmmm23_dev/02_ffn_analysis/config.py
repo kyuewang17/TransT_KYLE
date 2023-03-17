@@ -10,6 +10,10 @@ cfg = __C
 # ========= Set Configurations ========= #
 __C.MAIN_PARAMS = CN(new_allowed=True)
 
+__C.WANDB = CN(new_allowed=True)
+__C.WANDB.entity = "kyle0417"
+__C.WANDB.project = "acmmm23"
+
 # === Data Parameters === #
 __C.DATA = CN(new_allowed=False)
 __C.DATA.root_path = "/home/kyle/PycharmProjects/TransT_KYLE/acmmm23_dev/ffn_data"

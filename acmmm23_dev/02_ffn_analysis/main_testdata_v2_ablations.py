@@ -6,6 +6,7 @@ import yaml
 import wandb
 import socket
 import time
+import datetime
 from copy import deepcopy
 import torch
 import itertools
@@ -15,7 +16,7 @@ from torch.optim import lr_scheduler
 from tqdm import tqdm
 
 from config import cfg
-from miscs import set_logger, fix_seed
+from miscs import set_logger, fix_seed, get_current_datetime_str
 from data.trk_data_obj import BENCHMARK_DATA_OBJ
 from data.test_loader import TEST_DATASET
 from model import load_model
@@ -31,8 +32,14 @@ __PROJECT_MASTER_PATH__ = "/home/kyle/PycharmProjects/TransT_KYLE"
 __BENCHMARK_DATASET__ = "OTB100"
 # __BENCHMARK_DATASET__ = "UAV123"
 
-# Is Multiple Configuration Loading
-__IS_MULTI_CFG_LOADING__ = False
+# Get Experiment Machine List
+# --> Assign "Hostname" for each experiment machine
+#     "hostname" can be obtained using "socket.gethostname()"
+__EXP_MACHINE_LIST__ = [
+    "PIL-kyle",
+    "carpenters1",
+    "carpenters2",
+]
 
 # CUDA Device Configuration
 __CUDA_DEVICE__ = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -46,10 +53,12 @@ __IS_DEBUG_MODE__ = False
 
 def cfg_loader(logger, cfg_filepath, **kwargs):
     # Unpack KWARGS
-    is_multi_loader = kwargs.get("is_multi_loader", False)
-    assert isinstance(is_multi_loader, bool)
+    exp_machine_list = kwargs.get("exp_machine_list")
+    assert isinstance(exp_machine_list, list) and len(exp_machine_list) > 0
+    curr_hostname = socket.gethostname()
+    assert curr_hostname in exp_machine_list
     ablation_cfg_filepath = kwargs.get("ablation_cfg_filepath")
-    if is_multi_loader:
+    if len(exp_machine_list) > 1:
         assert ablation_cfg_filepath is not None
     ablation_cfg_shuffle_seed = kwargs.get("ablation_cfg_shuffle_seed", 333)
     assert isinstance(ablation_cfg_shuffle_seed, int) and ablation_cfg_shuffle_seed > 0
@@ -61,7 +70,7 @@ def cfg_loader(logger, cfg_filepath, **kwargs):
     time.sleep(1)
     logger.info("\n=== Configuration File Logging ===\n{}\n==================================".format(cfg))
     time.sleep(1)
-    if is_multi_loader is False:
+    if len(exp_machine_list) == 1:
         return [cfg]
     else:
         assert os.path.isfile(ablation_cfg_filepath)
@@ -70,9 +79,10 @@ def cfg_loader(logger, cfg_filepath, **kwargs):
             ablation_cfg = yaml.safe_load(ablation_f)
         logger.info("\nAblation Configuration File Loaded from: {}".format(ablation_cfg_filepath))
         time.sleep(1)
-        return merge_ablation_cfg(
+        cfgs = merge_ablation_cfg(
             ablation_cfg=ablation_cfg, shuffle_seed=ablation_cfg_shuffle_seed
         )
+        return split_cfgs(cfgs=cfgs, exp_machine_list=exp_machine_list)[curr_hostname]
 
 
 def merge_ablation_cfg(ablation_cfg, shuffle_seed=None):
@@ -175,8 +185,81 @@ def merge_ablation_cfg(ablation_cfg, shuffle_seed=None):
     return cfgs
 
 
-def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
+def split_cfgs(cfgs, exp_machine_list):
+    chunks = len(cfgs) // len(exp_machine_list)
+    cfgs_split = {}
+    for jj, exp_machine_name in enumerate(exp_machine_list):
+        if jj < len(exp_machine_list) - 1:
+            cfgs_split[exp_machine_name] = cfgs[jj * chunks:(jj + 1) * chunks]
+        else:
+            cfgs_split[exp_machine_name] = cfgs[jj * chunks:]
+    return cfgs_split
+
+
+def generate_exp_name(cfgtion):
+    # Generate Overlap Threshold String
+    overlap_thresh_str = "["
+    overlap_thresholds = cfgtion.MAIN_PARAMS.overlap_thresholds
+    for i_idx, overlap_thresh in enumerate(overlap_thresholds):
+        if i_idx < len(overlap_thresholds) - 1:
+            overlap_thresh_str += "{}_".format(overlap_thresh)
+        else:
+            overlap_thresh_str += "{}]".format(overlap_thresh)
+
+    # Experiment Machine and Date String
+    exp_machine_date_str = "[HOST_{}]__[DATE_{}]".format(
+        socket.gethostname(), get_current_datetime_str("(%y-%m-%d)-(%H-%M-%S)")
+    )
+
+    # Experiment Key Information String
+    exp_key_info_str = "[DATA_{}]__[SEED_{}]__[OVTHR_{}]__[MODEL_{}]__[LOSS_{}]__[BSZ_{}]__[Lr_{}-{}]".format(
+        cfg.MAIN_PARAMS.benchmark, cfg.MAIN_PARAMS.train_seed, overlap_thresh_str, cfg.MAIN_PARAMS.model_type,
+        cfg.MAIN_PARAMS.loss_type, cfg.MAIN_PARAMS.batch_size, cfg.MAIN_PARAMS.base_lr, cfg.MAIN_PARAMS.min_lr
+    )
+
+    # Concatenate Experiment Strings
+    exp_str = "{}__{}".format(exp_machine_date_str, exp_key_info_str)
+    return exp_str
+
+
+def convert_cfgtion_to_wandb_cfg(cfgtion):
+    # Set WandB Configuration
+    wandb_cfg = {
+        "seed": cfgtion.MAIN_PARAMS.train_seed,
+        "overlap_thresholds": cfgtion.MAIN_PARAMS.overlap_thresholds,
+        "batch_size": cfgtion.MAIN_PARAMS.batch_size, "num_epochs": cfgtion.MAIN_PARAMS.num_epochs,
+        "loss_type": cfgtion.MAIN_PARAMS.loss_type, "model_type": cfgtion.MAIN_PARAMS.model_type,
+
+        # Data Information
+        "benchmark": cfgtion.MAIN_PARAMS.benchmark,
+        "benchmark_shuffle_seed": cfgtion.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
+        "split_ratio": {
+            "train": cfgtion.DATA.SPLIT_RATIO.train,
+            "validation": int(cfgtion.TRAIN.VALIDATION.switch) * cfgtion.DATA.SPLIT_RATIO.validation,
+            "test": (1 - int(cfgtion.TRAIN.VALIDATION.switch)) * cfgtion.DATA.SPLIT_RATIO.validation + cfgtion.DATA.SPLIT_RATIO.test
+        },
+
+        # Model Information
+        "model": cfgtion.MODEL[cfgtion.TRAIN.MODEL.type],
+
+        # Optimizer Information
+        "optim": cfgtion.OPTIM[cfgtion.TRAIN.OPTIM.type],
+
+        # Scheduler Information
+        "scheduler": cfgtion.SCHEDULER[cfgtion.TRAIN.SCHEDULER.type] if cfgtion.TRAIN.SCHEDULER.switch is True else None
+    }
+    return wandb_cfg
+
+
+def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
     assert isinstance(trk_dataset, TEST_DATASET)
+
+    # Unpack KWARGS
+    device = kwargs.get("device", __CUDA_DEVICE__)
+    is_debug_mode = kwargs.get("is_debug_mode", False)
+    assert isinstance(is_debug_mode, bool)
+    exp_machine_list = kwargs.get("exp_machine_list")
+    assert isinstance(exp_machine_list, list) and len(exp_machine_list) > 0
 
     # Unpack Configurations
     random_seed = cfgtion.TRAIN.random_seed
@@ -199,11 +282,44 @@ def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
     assert isinstance(is_validation, bool)
     val_epoch_interval = cfgtion.TRAIN.VALIDATION.epoch_interval
     assert isinstance(val_epoch_interval, int) and 0 < val_epoch_interval < num_epochs
-    if device is None:
-        device = __CUDA_DEVICE__
 
     # Fix Seed
     fix_seed(random_seed=random_seed, logger=logger)
+
+    # Generate Experiment Name
+    exp_name = generate_exp_name(cfgtion=cfgtion)
+
+    # Convert "cfgtion" to "wandb_cfg"
+    wandb_cfg = convert_cfgtion_to_wandb_cfg(cfgtion=cfgtion)
+    wandb_entity, wandb_project = cfgtion.WANDB.entity, cfgtion.WANDB.project
+
+    # === Import WandB if non-debug mode === #
+    if is_debug_mode is False:
+        # Declare WandB Api
+        wandb_api = wandb.Api()
+
+        # Get Runs, to exclude same experiments
+        try:
+            wandb_runs = wandb_api.runs(
+                wandb_entity + "/" + wandb_project, per_page=5000, filters={}
+            )
+
+            # Iterate for Runs and Gather Names
+            wandb_run_names = [wandb_run.name for wandb_run in wandb_runs]
+            raise AssertionError()
+
+        except ValueError:
+            pass
+
+        # Initialize WandB
+        wandb.init(project=wandb_project, entity=wandb_entity, config=wandb_cfg, reinit=True)
+        wandb.run.name = exp_name
+        logger.info("WandB Initialized as [{}]...!".format(exp_name))
+        time.sleep(1)
+
+    else:
+        logger.warn("WandB Not Initialized since Debugging Mode is True...!")
+        time.sleep(2)
 
     # Split Trk Dataset
     if is_validation:
@@ -274,13 +390,25 @@ def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
         logger.info("Scheduler Defined : [{}]".format(scheduler_type))
     time.sleep(0.5)
 
+    # # Watch Model via WandB
+    # if is_debug_mode is False:
+    #     wandb.watch(model)
+    #     logger.info("Watching Model via WandB...!")
+    #     time.sleep(1)
+
     # Iterative Training for each epoch
     for epoch in range(num_epochs):
+        # if epoch == 26:
+        #     print(1234)
+
         # Train Model
         model, train_loss, train_cls_metric_obj = train(
             train_dataloader=train_dataloader, model=model,
             criterion=criterion, optimizer=optim, epoch=epoch
         )
+
+        # Initialize WandB Logging Dictionary
+        wandb_log_dict = {}
 
         # Compute Current Epoch's Classification Evaluations
         train_recalls = 100 * train_cls_metric_obj.compute_recalls()
@@ -288,6 +416,15 @@ def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
         train_f1scores = 100 * train_cls_metric_obj.compute_f1scores()
         train_accuracy = 100 * train_cls_metric_obj.compute_accuracy()
         train_bal_accuracy = 100 * train_cls_metric_obj.compute_balanced_accuracy()
+
+        # Prepare WandB Logging
+        wandb_log_dict["Train/Lr"] = optim.param_groups[0]["lr"]
+        wandb_log_dict["Train/Loss"] = train_loss
+        wandb_log_dict["Train/Acc"] = train_accuracy
+        for label_idx in range(train_cls_metric_obj.class_num):
+            wandb_log_dict["Train/Recall(#{:02d})".format(label_idx)] = train_recalls[label_idx]
+            wandb_log_dict["Train/Precision(#{:02d})".format(label_idx)] = train_precisions[label_idx]
+            wandb_log_dict["Train/F1-Score(#{:02d})".format(label_idx)] = train_f1scores[label_idx]
 
         # todo: Save Model (for each saving epoch) Later
         pass
@@ -312,6 +449,20 @@ def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
                 val_FPR = 100 * val_cls_metric_obj.FPR()
                 val_TNR = 100 * val_cls_metric_obj.TNR()
 
+                # Prepare WandB Logging
+                wandb_log_dict["Val/Loss"] = val_loss
+                wandb_log_dict["Val/Acc"] = val_accuracy
+                wandb_log_dict["Val/TPR"] = val_TPR
+                wandb_log_dict["Val/FPR"] = val_FPR
+                for label_idx in range(val_cls_metric_obj.class_num):
+                    wandb_log_dict["Val/Recall(#{:02d})".format(label_idx)] = val_recalls[label_idx]
+                    wandb_log_dict["Val/Precision(#{:02d})".format(label_idx)] = val_precisions[label_idx]
+                    wandb_log_dict["Val/F1-Score(#{:02d})".format(label_idx)] = val_f1scores[label_idx]
+
+        # WandB Train/Val Logging
+        wandb_log_commit = False if epoch == num_epochs - 1 else True
+        wandb.log(wandb_log_dict, step=epoch, commit=wandb_log_commit)
+
         # Scheduler
         if scheduler is not None:
             scheduler.step()
@@ -330,6 +481,18 @@ def run_mlp_model(trk_dataset, logger, cfgtion, device, **kwargs):
     test_FNR = 100 * test_cls_metric_obj.FNR()
     test_FPR = 100 * test_cls_metric_obj.FPR()
     test_TNR = 100 * test_cls_metric_obj.TNR()
+
+    # Prepare WandB Logging
+    wandb_test_log_dict = {
+        "Test/Acc": test_accuracy, "Test/TPR": test_TPR, "Test/FPR": test_FPR,
+    }
+    for label_idx in range(test_cls_metric_obj.class_num):
+        wandb_test_log_dict["Test/Recall(#{:02d})".format(label_idx)] = test_recalls[label_idx]
+        wandb_test_log_dict["Test/Precision(#{:02d})".format(label_idx)] = test_precisions[label_idx]
+        wandb_test_log_dict["Test/F1-Score(#{:02d})".format(label_idx)] = test_f1scores[label_idx]
+
+    # WandB Test Logging
+    wandb.log(wandb_test_log_dict)
 
     # todo: Save Final Model
     print(12345)
@@ -356,7 +519,8 @@ if __name__ == "__main__":
     # Load Configurations via YAML file
     cfgs = cfg_loader(
         logger=_logger, cfg_filepath=cfg_filepath,
-        is_multi_loader=__IS_MULTI_CFG_LOADING__, ablation_cfg_filepath=ablation_cfg_filepath
+        exp_machine_list=__EXP_MACHINE_LIST__,
+        ablation_cfg_filepath=ablation_cfg_filepath
     )
 
     # Iterate for Configurations
@@ -379,7 +543,9 @@ if __name__ == "__main__":
 
         # Run MLP Model Code
         run_mlp_model(
-            trk_dataset=trk_dataset, logger=_logger, cfgtion=_cfg, device=__CUDA_DEVICE__,
+            trk_dataset=trk_dataset, logger=_logger, cfgtion=_cfg,
+            device=__CUDA_DEVICE__,
+            is_debug_mode=__IS_DEBUG_MODE__, exp_machine_list=__EXP_MACHINE_LIST__,
         )
 
         pass
