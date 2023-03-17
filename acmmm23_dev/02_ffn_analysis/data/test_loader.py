@@ -172,6 +172,14 @@ class TEST_DATASET(Dataset):
         return new_obj
 
     def compute_label_sums(self, cvt_to_ratio=False):
+        labels = self.get_labels()
+        label_sums = np.array(labels).sum(axis=0)
+        if cvt_to_ratio:
+            return label_sums / label_sums.sum()
+        else:
+            return label_sums
+
+    def get_labels(self):
         if self.labeling_type == "scalar":
             _c_self = self._clone(self.data)
             _c_self.convert_labeling_type(labeling_type="one_hot")
@@ -184,11 +192,7 @@ class TEST_DATASET(Dataset):
         for data_dict in data_dict_list:
             labels.append(data_dict["label"])
 
-        label_sums = np.array(labels).sum(axis=0)
-        if cvt_to_ratio:
-            return label_sums / label_sums.sum()
-        else:
-            return label_sums
+        return labels
 
     def convert_labeling_type(self, labeling_type):
         assert labeling_type in ["one_hot", "scalar"]

@@ -9,6 +9,8 @@ import time
 import datetime
 from copy import deepcopy
 import torch
+import torch.utils.data.sampler as t_sampler
+import torchsampler
 import itertools
 from yacs.config import CfgNode
 from torch.utils.data import DataLoader
@@ -36,9 +38,9 @@ __BENCHMARK_DATASET__ = "OTB100"
 # --> Assign "Hostname" for each experiment machine
 #     "hostname" can be obtained using "socket.gethostname()"
 __EXP_MACHINE_LIST__ = [
-    # "PIL-kyle",
-    "carpenters1",
-    "carpenters2",
+    "PIL-kyle",
+    # "carpenters1",
+    # "carpenters2",
 ]
 
 # CUDA Device Configuration
@@ -342,7 +344,17 @@ def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
         val_dataset = None
 
     # Wrap Dataset with PyTorch DataLoader
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    _weights = 1. / train_dataset.compute_label_sums()
+    s_weights = np.array(
+        [_weights[_data["label"].argmax()] for _data in train_dataset.data]
+    )
+    s_weights = torch.from_numpy(s_weights)
+    train_sampler = t_sampler.WeightedRandomSampler(
+        s_weights.type("torch.DoubleTensor"), len(s_weights)
+    )
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=batch_size, sampler=train_sampler
+    )
     logger.info("\nTraining DataLoader Loaded Completely...! - # of Samples: [{:,}]".format(len(train_dataset)))
     if is_validation:
         val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
