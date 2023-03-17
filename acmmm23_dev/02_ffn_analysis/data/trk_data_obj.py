@@ -336,7 +336,7 @@ class BENCHMARK_DATA_OBJ(object):
                 video_data_obj.set_labels(
                     labeling_type=labeling_type, overlap_thresholds=overlap_thresholds
                 )
-            labels.append(video_data_obj.labels)
+            labels.append(video_data_obj.labels[1:])
 
         # Concatenate Labels
         self.labels = np.concatenate(labels, axis=0)
@@ -535,7 +535,14 @@ if __name__ == "__main__":
         overlap_criterion="iou", overlap_thresholds=[0.5],
         labeling_type="one_hot",
 
-        # load_with_mp=True, num_cpu_workers=1,
+        is_debug_mode=False,
+    )
+
+    # old_FFN_OBJ = deepcopy(FFN_OBJ)
+
+    # Reload Test
+    FFN_OBJ.reload(
+        overlap_criterion="iou", overlap_thresholds=[0.6]
     )
 
     pass
