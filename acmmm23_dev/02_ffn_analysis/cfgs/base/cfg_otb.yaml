@@ -38,7 +38,7 @@ TRAIN:
   weight_decay: &WEIGHT_DECAY 0.0
   VALIDATION:
     switch: true
-    epoch_interval: 10
+    epoch_interval: 5
   LOSS:
     type: *LOSS_TYPE
   OPTIM:
