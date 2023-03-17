@@ -6,6 +6,6 @@ pip install psutil==5.9.4
 pip install matplotlib
 pip install loguru==0.6.0
 pip install wandb==0.13.11
-
-
+pip install pyyaml
+pip install yacs
 
