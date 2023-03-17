@@ -56,7 +56,7 @@ def cfg_loader(logger, cfg_filepath, **kwargs):
     exp_machine_list = kwargs.get("exp_machine_list")
     assert isinstance(exp_machine_list, list) and len(exp_machine_list) > 0
     curr_hostname = socket.gethostname()
-    assert curr_hostname in exp_machine_list
+    # assert curr_hostname in exp_machine_list
     ablation_cfg_filepath = kwargs.get("ablation_cfg_filepath")
     if len(exp_machine_list) > 1:
         assert ablation_cfg_filepath is not None
@@ -281,7 +281,7 @@ def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
     is_validation = cfgtion.TRAIN.VALIDATION.switch
     assert isinstance(is_validation, bool)
     val_epoch_interval = cfgtion.TRAIN.VALIDATION.epoch_interval
-    assert isinstance(val_epoch_interval, int) and 0 < val_epoch_interval < num_epochs
+    assert isinstance(val_epoch_interval, int) and 0 < val_epoch_interval
 
     # Fix Seed
     fix_seed(random_seed=random_seed, logger=logger)
@@ -306,7 +306,15 @@ def run_mlp_model(trk_dataset, logger, cfgtion, **kwargs):
 
             # Iterate for Runs and Gather Names
             wandb_run_names = [wandb_run.name for wandb_run in wandb_runs]
-            raise AssertionError()
+            wandb_exp_names = [wandb_run_name.split("__", 2)[-1] for wandb_run_name in wandb_run_names]
+            wandb_exp_names = np.array(wandb_exp_names)
+
+            # Find if Current Experiment Exist in the Project
+            wandb_indices = np.where(wandb_exp_names == exp_name.split("__", 2)[-1])[0]
+            if len(wandb_indices) > 0:
+                logger.warn("Skipping Experiment: {}".format(exp_name))
+                time.sleep(2)
+                return
 
         except ValueError:
             pass
@@ -547,5 +555,11 @@ if __name__ == "__main__":
             device=__CUDA_DEVICE__,
             is_debug_mode=__IS_DEBUG_MODE__, exp_machine_list=__EXP_MACHINE_LIST__,
         )
+
+        # Flush CUDA Memory
+        torch.cuda.empty_cache()
+
+        # Sleep for 10 seconds (wait enough for wandb process to finish)
+        time.sleep(10)
 
         pass
