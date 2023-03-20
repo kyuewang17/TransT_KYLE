@@ -304,60 +304,8 @@ class BENCHMARK_DATA_OBJ(object):
         self.overlaps, self.labels = self.overlaps[rand_perm], self.labels[rand_perm]
         self.gt_bboxes, self.trk_bboxes = self.gt_bboxes[rand_perm], self.trk_bboxes[rand_perm]
 
-    def set_labels(self, **kwargs):
-        # Unpack KWARGS
-        labeling_type = kwargs.get("labeling_type")
-        if labeling_type is None:
-            labeling_type = self.labeling_type
-        else:
-            assert labeling_type in ["one_hot", "scalar"]
-            self.labeling_type = labeling_type
-
-        overlap_thresholds = kwargs.get("overlap_thresholds")
-        if overlap_thresholds is None:
-            overlap_thresholds = self.overlap_thresholds
-        else:
-            assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
-            assert len(overlap_thresholds) > 0
-            if isinstance(overlap_thresholds, tuple):
-                overlap_thresholds = list(overlap_thresholds)
-            elif isinstance(overlap_thresholds, np.ndarray):
-                overlap_thresholds = overlap_thresholds.tolist()
-            overlap_thresholds = sorted(overlap_thresholds)
-            self.overlap_thresholds = overlap_thresholds
-
-        video_indices = kwargs.get("video_indices", self.video_info["indices"])
-        assert set(video_indices).issubset(self.video_info["indices"])
-
-        # Iteratively Set Labels for "video_data_objs", gather labels simultaneously
-        labels = []
-        for v_idx, video_data_obj in enumerate(self.video_data_objs):
-            if v_idx in video_indices:
-                video_data_obj.set_labels(
-                    labeling_type=labeling_type, overlap_thresholds=overlap_thresholds
-                )
-            labels.append(video_data_obj.labels[1:])
-
-        # Concatenate Labels
-        self.labels = np.concatenate(labels, axis=0)
-
-    def reload(self, **kwargs):
-        # Unpack KWARGS
-        overlap_criterion = kwargs.get("overlap_criterion", self.overlap_criterion)
+    def set_overlaps(self, overlap_criterion):
         assert overlap_criterion in ["iou", "giou", "diou", "ciou"]
-        # self.overlap_criterion = overlap_criterion
-        overlap_thresholds = kwargs.get("overlap_thresholds", self.overlap_thresholds)
-        assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
-        if isinstance(overlap_thresholds, tuple):
-            overlap_thresholds = list(overlap_thresholds)
-        elif isinstance(overlap_thresholds, np.ndarray):
-            overlap_thresholds = overlap_thresholds.tolist()
-        # self.overlap_thresholds = sorted(overlap_thresholds)
-        labeling_type = kwargs.get("labeling_type", self.labeling_type)
-        assert labeling_type in ["one_hot", "scalar"]
-        # self.labeling_type = labeling_type
-
-        # If "overlap_criterion" changed,
         if overlap_criterion != self.overlap_criterion:
             if overlap_criterion == "diou":
                 self.overlaps = rect_diou(self.gt_bboxes, self.trk_bboxes)
@@ -367,11 +315,69 @@ class BENCHMARK_DATA_OBJ(object):
                 raise NotImplementedError()
             self.overlap_criterion = overlap_criterion
 
-        # If "overlap_thresholds" or "labeling_type" changed,
-        if overlap_thresholds != self.overlap_thresholds or labeling_type != self.labeling_type:
-            self.set_labels(
-                overlap_thresholds=overlap_thresholds, labeling_type=labeling_type
-            )
+    def set_labels(self, overlap_thresholds):
+        assert isinstance(overlap_thresholds, (list, tuple, np.ndarray))
+        if isinstance(overlap_thresholds, tuple):
+            overlap_thresholds = list(overlap_thresholds)
+        elif isinstance(overlap_thresholds, np.ndarray):
+            overlap_thresholds = overlap_thresholds.tolist()
+
+        # If "overlap_thresholds" changed, re-label
+        if overlap_thresholds != self.overlap_thresholds:
+            new_labels = []
+            for overlap in self.overlaps:
+                # Initialize "label" array for every iteration
+                label = np.zeros(len(overlap_thresholds) + 1).astype(int)
+
+                # Compute Label for Current Sample
+                for i_idx, overlap_thresh in enumerate(overlap_thresholds):
+                    if overlap < overlap_thresh:
+                        np.add.at(label, [i_idx], 1)
+                    detect_true_label = np.where(label == 1)[0]
+                    if len(detect_true_label) > 0:
+                        break
+                if label.max() == 0:
+                    label[-1] = 1
+                if self.labeling_type == "scalar":
+                    label = label.argmax()
+
+                # Append to List
+                new_labels.append(label)
+
+            # Convert to Numpy Array
+            self.labels = np.array(new_labels)
+
+            # Change "overlap_thresholds"
+            self.overlap_thresholds = overlap_thresholds
+
+    def convert_labeling_type(self, labeling_type):
+        assert labeling_type in ["one_hot", "scalar"]
+
+        if labeling_type != self.labeling_type:
+            if labeling_type == "scalar":
+                new_labels = self.labels.argmax(axis=1)
+            elif labeling_type == "one_hot":
+                label_indices = FFN_OBJ.labels.argmax(axis=1)
+                new_labels = np.zeros((label_indices, len(self.overlap_thresholds)+1), dtype=int)
+                new_labels[np.arange(label_indices.size), label_indices] = 1
+            else:
+                raise AssertionError()
+
+            # Update "labels" and "labeling_type"
+            self.labels, self.labeling_type = new_labels, labeling_type
+
+    def reload(self, **kwargs):
+        # Unpack KWARGS
+        overlap_criterion = kwargs.get("overlap_criterion", self.overlap_criterion)
+        overlap_thresholds = kwargs.get("overlap_thresholds", self.overlap_thresholds)
+        labeling_type = kwargs.get("labeling_type", self.labeling_type)
+
+        # Set Overlaps
+        self.set_overlaps(overlap_criterion=overlap_criterion)
+
+        # Set Labels
+        self.set_labels(overlap_thresholds=overlap_thresholds)
+        self.convert_labeling_type(labeling_type=labeling_type)
 
 
 class VIDEO_DATA_OBJ(object):
@@ -533,9 +539,9 @@ if __name__ == "__main__":
         root_path=ffn_data_path, benchmark=__BENCHMARK_DATASET__, logger=_logger,
 
         overlap_criterion="iou", overlap_thresholds=[0.5],
-        labeling_type="one_hot",
+        labeling_type="one_hot", debug_samples=500,
 
-        is_debug_mode=False,
+        is_debug_mode=True,
     )
 
     # old_FFN_OBJ = deepcopy(FFN_OBJ)
