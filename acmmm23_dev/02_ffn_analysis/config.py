@@ -12,7 +12,7 @@ __C.MAIN_PARAMS = CN(new_allowed=True)
 
 __C.WANDB = CN(new_allowed=True)
 __C.WANDB.entity = "kyle0417"
-__C.WANDB.project = "acmmm23"
+__C.WANDB.project = "acmmm23_bugfix"
 
 # === Data Parameters === #
 __C.DATA = CN(new_allowed=False)

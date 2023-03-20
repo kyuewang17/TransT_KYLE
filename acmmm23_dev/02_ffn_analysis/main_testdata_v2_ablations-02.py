@@ -40,7 +40,7 @@ __BENCHMARK_DATASET__ = "OTB100"
 __EXP_MACHINE_LIST__ = [
     "PIL-kyle",
     "carpenters1",
-    "carpenters1",
+    "carpenters1-2",
     # "carpenters2",
 ]
 
@@ -85,7 +85,7 @@ def cfg_loader(logger, cfg_filepath, **kwargs):
         cfgs = merge_ablation_cfg(
             ablation_cfg=ablation_cfg, shuffle_seed=ablation_cfg_shuffle_seed
         )
-        return split_cfgs(cfgs=cfgs, exp_machine_list=exp_machine_list)[curr_hostname]
+        return split_cfgs(cfgs=cfgs, exp_machine_list=exp_machine_list)["{}-2".format(curr_hostname)]
 
 
 def merge_ablation_cfg(ablation_cfg, shuffle_seed=None):
@@ -210,7 +210,7 @@ def generate_exp_name(cfgtion):
             overlap_thresh_str += "{}]".format(overlap_thresh)
 
     # Experiment Machine and Date String
-    exp_machine_date_str = "[HOST_{}-2]__[DATE_{}]".format(
+    exp_machine_date_str = "[HOST_{}]__[DATE_{}]".format(
         socket.gethostname(), get_current_datetime_str("(%y-%m-%d)-(%H-%M-%S)")
     )
 
