@@ -210,7 +210,7 @@ def generate_exp_name(cfgtion):
             overlap_thresh_str += "{}]".format(overlap_thresh)
 
     # Experiment Machine and Date String
-    exp_machine_date_str = "[HOST_{}]__[DATE_{}]".format(
+    exp_machine_date_str = "[HOST_{}-2]__[DATE_{}]".format(
         socket.gethostname(), get_current_datetime_str("(%y-%m-%d)-(%H-%M-%S)")
     )
 
