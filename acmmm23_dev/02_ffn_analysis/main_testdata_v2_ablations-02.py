@@ -39,8 +39,8 @@ __BENCHMARK_DATASET__ = "OTB100"
 #     "hostname" can be obtained using "socket.gethostname()"
 __EXP_MACHINE_LIST__ = [
     "PIL-kyle",
-    "carpenters1-1",
-    "carpenters1-2",
+    "carpenters1",
+    "carpenters1",
     # "carpenters2",
 ]
 

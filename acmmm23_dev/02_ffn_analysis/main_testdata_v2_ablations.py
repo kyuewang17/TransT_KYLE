@@ -559,6 +559,7 @@ if __name__ == "__main__":
                 overlap_thresholds=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.overlap_thresholds,
                 labeling_type=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.labeling_type,
                 random_seed=_cfg.DATA.OPTS.BENCHMARK_DATA_OBJ.random_seed,
+                device=__CUDA_DEVICE__,
                 is_debug_mode=__IS_DEBUG_MODE__,
             )
         else:
