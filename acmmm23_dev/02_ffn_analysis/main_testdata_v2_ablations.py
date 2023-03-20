@@ -40,7 +40,7 @@ __BENCHMARK_DATASET__ = "OTB100"
 __EXP_MACHINE_LIST__ = [
     "PIL-kyle",
     "carpenters1",
-    "carpenters1",
+    "carpenters1-2",
     # "carpenters2",
 ]
 
