@@ -45,7 +45,7 @@ __EXP_MACHINE_LIST__ = [
 ]
 
 # CUDA Device Configuration
-__CUDA_DEVICE__ = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+__CUDA_DEVICE__ = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 # Memory Cut-off Percentage
 __MEMORY_CUTOFF_PERCENT__ = 95
