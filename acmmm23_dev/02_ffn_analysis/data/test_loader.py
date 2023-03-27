@@ -32,11 +32,10 @@ __MEMORY_CUTOFF_PERCENT__ = 95
 
 
 class TEST_DATASET(Dataset):
-    # def __init__(self, data_obj, logger, **kwargs):
-    def __init__(self, logger, init_mode, **kwargs):
+    def __init__(self, init_mode, **kwargs):
 
         # Set Basic Variables
-        self.logger = logger
+        self.logger = kwargs.get("logger")
 
         # Assertion of Init Mode
         assert init_mode in ["data_obj", "data_list"]
@@ -160,16 +159,22 @@ class TEST_DATASET(Dataset):
         # Return Split Objects
         return self._clone(split_data), self._clone(post_split_data)
 
-    def _clone(self, new_data):
-        assert new_data is not None and isinstance(new_data, list)
-        assert len(new_data) > 0
-        new_obj = TEST_DATASET(
-            logger=self.logger, init_mode="data_list",
-            device=self.device, data=new_data, dataset_name=self.dataset_name,
-            overlap_criterion=self.overlap_criterion, overlap_thresholds=self.overlap_thresholds,
-            labeling_type=self.labeling_type,
-        )
-        return new_obj
+    def _clone(self, new_data=None):
+        if new_data is None:
+            return TEST_DATASET(
+                logger=self.logger, init_mode="data_list",
+                device=self.device, data=self.data, dataset_name=self.dataset_name,
+                overlap_criterion=self.overlap_criterion, overlap_thresholds=self.overlap_thresholds,
+                labeling_type=self.labeling_type,
+            )
+        else:
+            assert isinstance(new_data, list) and len(new_data) > 0
+            return TEST_DATASET(
+                logger=self.logger, init_mode="data_list",
+                device=self.device, data=new_data, dataset_name=self.dataset_name,
+                overlap_criterion=self.overlap_criterion, overlap_thresholds=self.overlap_thresholds,
+                labeling_type=self.labeling_type,
+            )
 
     def compute_label_sums(self, cvt_to_ratio=False):
         labels = self.get_labels()
@@ -197,7 +202,8 @@ class TEST_DATASET(Dataset):
     def convert_labeling_type(self, labeling_type):
         assert labeling_type in ["one_hot", "scalar"]
         if self.labeling_type == labeling_type:
-            self.logger.warning("Labeling Type is Same... Conversion Skipped!")
+            if self.logger is not None:
+                self.logger.warning("Labeling Type is Same... Conversion Skipped!")
             return
 
         # Iterate for "self.data"
@@ -216,11 +222,12 @@ class TEST_DATASET(Dataset):
                 data["label"] = new_label
 
         # Complete Message
-        self.logger.info(
-            "Label Conversion from [{}] to [{}] completed...!".format(
-                self.labeling_type, labeling_type
+        if self.logger is not None:
+            self.logger.info(
+                "Label Conversion from [{}] to [{}] completed...!".format(
+                    self.labeling_type, labeling_type
+                )
             )
-        )
 
         # Set Labeling Type Parameter
         self.labeling_type = labeling_type

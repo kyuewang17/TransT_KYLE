@@ -42,12 +42,12 @@ __MEMORY_CUTOFF_PERCENT__ = 95
 
 
 class BENCHMARK_DATA_OBJ(object):
-    def __init__(self, root_path, benchmark, logger, **kwargs):
+    def __init__(self, root_path, benchmark, **kwargs):
         assert os.path.isdir(root_path)
 
         # Set Basic Variables
         self.root_path, self.benchmark = root_path, benchmark
-        self.logger = logger
+        self.logger = kwargs.get("logger")
 
         # Unpack "root_path" subdirectories to get total video names
         video_names = sorted(os.listdir(root_path))
@@ -120,7 +120,7 @@ class BENCHMARK_DATA_OBJ(object):
         for video_idx, video_name in enumerate(benchmark_tqdm_iter_obj):
             video_path = video_paths[video_idx]
             video_data_obj = VIDEO_DATA_OBJ(
-                root_path=video_path, benchmark=benchmark, video_name=video_name, logger=logger,
+                root_path=video_path, benchmark=benchmark, video_name=video_name, logger=self.logger,
                 overlap_criterion=overlap_criterion, overlap_thresholds=overlap_thresholds,
                 labeling_type=labeling_type, device=device
             )
