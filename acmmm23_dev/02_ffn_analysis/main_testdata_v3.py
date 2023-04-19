@@ -678,6 +678,8 @@ if __name__ == "__main__":
         }
 
         # Get Process
+        # fixme: too long (not function "mp_run_mlp_model")
+        #       --> "trk_data_obj" initialization inside function "mp_run_mlp_model" ??
         proc = t_mp.Process(
             target=mp_run_mlp_model,
             args=(return_dict, trk_data_obj), kwargs=proc_kwargs
